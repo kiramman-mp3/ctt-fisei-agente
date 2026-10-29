@@ -82,6 +82,11 @@
 
   async function api(url, options) {
     const res = await fetch(url, options && { ...options, headers: { 'Content-Type': 'application/json' } });
+    // Sesión vencida o cerrada en otra pestaña: vuelve al inicio de sesión.
+    if (res.status === 401) {
+      location.href = '/login.html';
+      throw new Error('Sesión requerida');
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `${res.status} ${url}`);
     return body;
@@ -992,6 +997,16 @@
 
   renderFilters();
   syncMuteButton();
+  api('/api/auth/me')
+    .then((me) => {
+      $('operator').textContent = me.username;
+    })
+    .catch(() => {});
+  $('logout').addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    location.href = '/login.html';
+  });
+
   $('mute-alerts').addEventListener('click', () => {
     localStorage.setItem(MUTE_KEY, alertsMuted() ? '0' : '1');
     syncMuteButton();

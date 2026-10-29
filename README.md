@@ -62,6 +62,7 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 - **Asesora con tono humano**: el prompt define a "Sofía", que conversa en mensajes cortos, recomienda uno o dos cursos según el perfil y explica su valor en lugar de listar el catálogo.
 - **Perfilado y manejo de objeciones**: descubre si la persona es estudiante UTA, graduado o público general (define la tarifa) y responde a "es caro", "no tengo tiempo" o "no sé si tengo el nivel" con datos reales del curso.
 - **Cierre de inscripción**: ante intención clara comparte el formulario de inscripción del curso y detecta inscripciones vencidas comparando con la fecha de hoy.
+- **Formulario prellenado**: al compartir el enlace de inscripción, rellena en el Google Form los datos ya conocidos del prospecto (nombre, cédula, correo, teléfono, tipo y curso) para que solo revise y envíe.
 - **Handover transparente**: la IA se pausa sola ante frustración, pedido de humano o la herramienta `transferir_a_asesor`; el operador escribe desde el panel y el mensaje llega con la identidad del bot.
 - **Reanudación automática**: si el operador no responde en `HANDOVER_TIMEOUT_MIN` minutos, la IA retoma la conversación.
 - **Termómetro en tiempo real**: cada tarjeta muestra el estado del prospecto con icono, etiqueta y color, más el modo (IA u operador) y los mensajes sin leer.

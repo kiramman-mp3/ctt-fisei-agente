@@ -239,12 +239,24 @@ Reinicia el proceso al guardar cambios. Para ver el panel con datos, ejecuta ant
 | `npm run dev` | Igual que `start`, con recarga automática |
 | `npm run scrape` | Descarga el catálogo y actualiza `data/courses.json` |
 | `npm run models` | Lista los modelos del proveedor configurado |
-| `npm run seed` | Crea 60 conversaciones de ejemplo en la base configurada |
+| `npm run seed` | Crea 4 guiones `[demo]` + 60 conversaciones de ejemplo en la base configurada |
+| `npm run eval` | Batería de evaluación del agente (PASS/FAIL; sale ≠0 si falla) |
+| `npm run demo:check` | Chequeo previo a la demo: entorno, catálogo, health opcional y guiones |
 | `npm run lint` | ESLint sobre todo el proyecto |
 | `npm test` | Pruebas con `node:test` |
 | `npm run check` | Lint y pruebas |
 | `npm run tunnel` | Expone el panel local con un túnel de Cloudflare (requiere `cloudflared`) |
 | `npm run deploy:azure` | Construye la imagen en Azure y publica la Web App |
+
+### Antes de una demo
+
+```bash
+npm run demo:check
+npm run seed
+npm run eval
+```
+
+`demo:check` verifica `LLM_API_KEY`, el catálogo en `data/courses.json` (totales y ofertables) y, si defines `BASE_URL` (p. ej. `http://localhost:3000`), que `GET /api/status` responda. Lista los cuatro guiones etiquetados `[demo]` del seed: objeción de precio, inyección bloqueada, handover por frustración y lead caliente. `eval` ejercita el agente real (~18 casos de rúbrica + ataques) con chats aislados, imprime PASS/FAIL y limpia los datos de prueba.
 
 ### Comandos del bot
 
@@ -284,7 +296,7 @@ docker build -t ctt-fisei-agente .
 docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-agente
 ```
 
-**Demo desde una laptop**: `npm start` y en otra terminal `npm run tunnel`; Cloudflare devuelve una URL pública `https://*.trycloudflare.com` para el panel.
+**Demo desde una laptop**: `npm start` y en otra terminal `npm run tunnel`; Cloudflare devuelve una URL pública `https://*.trycloudflare.com` para el panel. Antes de enseñarlo, corre `npm run demo:check` (con `BASE_URL` apuntando al panel si ya está arriba) y, si quieres datos en la bandeja, `npm run seed`.
 
 ---
 
@@ -364,7 +376,7 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - [x] Protocolo de contención ante riesgo para la persona
 - [ ] Varios operadores con asignación de conversaciones
 - [ ] Notificaciones push al operador cuando la IA se pausa
-- [ ] Evaluaciones automáticas de calidad de respuestas
+- [x] Evaluaciones automáticas de calidad de respuestas (`npm run eval`) y chequeo previo a la demo (`npm run demo:check`)
 
 ---
 

@@ -13,11 +13,12 @@
 Se construyó para el Reto Oficial Hackathon 2026 de la FISEI-UTA (*Ecosistema Multi-Agente para Ventas y Gestión Conversacional*), a partir de la oferta publicada en [ctt-talleresfisei.uta.edu.ec](https://ctt-talleresfisei.uta.edu.ec/course.php).
 
 > [!TIP]
-> Para verlo funcionando en local, sin claves, con datos de ejemplo:
-> ```bash
-> npm install && npm run seed && npm start
-> ```
-> Abre `http://localhost:3000`. Con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN` en `.env` el bot responde en Telegram.
+> **Entregables en vivo**
+> - Bot de Telegram: [t.me/CttFiseiAsistenteBot](https://t.me/CttFiseiAsistenteBot)
+> - Panel de mando: [ctt-fisei-asistente.azurewebsites.net](https://ctt-fisei-asistente.azurewebsites.net)
+> - Landing pública con QR de Telegram y WhatsApp: [ctt-fisei-asistente.azurewebsites.net/contacto.html](https://ctt-fisei-asistente.azurewebsites.net/contacto.html)
+>
+> En local, con datos de ejemplo: `npm install && npm run seed && npm start` y abre `http://localhost:3000`.
 
 ---
 
@@ -88,10 +89,10 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 
 ## 🛠️ Tecnologías Utilizadas
 
-- **Frontend**: HTML, CSS y JavaScript sin framework; Chart.js 4.4.1 desde cdnjs; `EventSource` para SSE. La identidad visual replica la del sitio del CTT: Poppins, rojo UTA `#AD272E`, pizarra `#44425A`, lila `#F2F1F8` y los pósters de curso en marino `#012E5A` y carmesí `#B70717`.
+- **Frontend**: HTML, CSS y JavaScript sin framework; gráficas de tendencia en SVG propio y Chart.js 4.4.1 (cdnjs) para las de barras; `EventSource` para SSE. La identidad visual replica la del sitio del CTT: Poppins, rojo UTA `#AD272E`, pizarra `#44425A`, lila `#F2F1F8` y los pósters de curso en marino `#012E5A` y carmesí `#B70717`.
 - **Backend**: Node.js (ESM), Express 5, grammY, whatsapp-web.js, SDK `openai` contra un proveedor compatible (por defecto Groq con `gpt-oss-120b`; también funciona con xAI), cheerio y undici para el scraping.
 - **Base de datos**: SQLite con el módulo nativo `node:sqlite` (sin dependencias nativas).
-- **Pruebas**: `node:test` y ESLint 10.
+- **Pruebas**: `node:test` (unitarias e integración del servicio, guardas adversariales, panel y prellenado), batería de evaluación contra el LLM real (`npm run eval`) y ESLint 10.
 - **Despliegue**: Docker (Node 24 + Chromium) en Azure App Service con Azure Container Registry; también blueprint de Render y túnel de Cloudflare para demos locales.
 
 ---
@@ -115,6 +116,8 @@ graph TD
     BUS -->|SSE| DASH[Panel web<br/>dashboard/]
     DASH -->|mensaje del operador / modo| CS
     CS -->|mismo bot| TG
+    AG -->|ver_curso + perfil| PF[Prellenado del Google Form<br/>agent/enrollment-link.js]
+    LAND[Landing pública<br/>contacto.html] -->|/api/public| DASH
 ```
 
 Los conectores de mensajería solo traducen eventos del canal; toda la lógica de atención (handover, persistencia, análisis) vive en `ConversationService`, y el pipeline de inferencia (`CourseAgent`) no conoce la base de datos. El panel se entera de todo por el bus de eventos.
@@ -133,6 +136,7 @@ Los conectores de mensajería solo traducen eventos del canal; toda la lógica d
 │   │   ├── analyzer.js             # Termómetro, perfil y resumen del prospecto
 │   │   ├── prompt.js               # Prompt de sistema y catálogo compacto
 │   │   ├── tools.js                # buscar_cursos, ver_curso, transferir_a_asesor
+│   │   ├── enrollment-link.js      # Enlace de inscripción con Google Form prellenado
 │   │   ├── transcriber.js          # Transcripción de notas de voz
 │   │   └── list-models.js          # Lista modelos del proveedor (npm run models)
 │   ├── core/
@@ -154,12 +158,15 @@ Los conectores de mensajería solo traducen eventos del canal; toda la lógica d
 │   │   ├── run.js                  # npm run scrape
 │   │   └── certs/                  # Certificado intermedio que la web de la UTA no envía
 │   └── dashboard/
-│       ├── server.js               # API REST + SSE + CORS + auth básica
-│       └── public/                 # Panel (HTML, CSS, JS e img/logo-ctt.png)
+│       ├── server.js               # API REST + SSE + CORS + auth básica opcional + API pública
+│       └── public/                 # Panel (index.html, app.js, styles.css), landing (contacto.*) e img/
 ├── data/courses.json               # Snapshot del catálogo (respaldo si la web no responde)
 ├── test/                           # Pruebas node:test y fixtures HTML
 ├── docs/capturas/                  # Capturas del panel
-├── scripts/deploy-azure.sh         # Despliegue en Azure App Service
+├── scripts/
+│   ├── deploy-azure.sh             # Despliegue en Azure App Service
+│   ├── eval-agent.js               # Batería de evaluación del agente (npm run eval)
+│   └── demo-check.js               # Chequeo previo a la demo (npm run demo:check)
 ├── Dockerfile                      # Imagen con Node 24 y Chromium
 ├── render.yaml                     # Blueprint de Render
 └── .env.example                    # Plantilla de variables de entorno
@@ -206,7 +213,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | Token de @BotFather |
 | `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL` | Transcripción de voz (opcional, por defecto Groq Whisper) |
 | `WHATSAPP_ENABLED`, `CHROME_PATH`, `WWEBJS_DATA_PATH` | Conectar WhatsApp al arrancar, ejecutable de Chrome y carpeta de la sesión |
-| `DASHBOARD_PORT`, `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Puerto y autenticación básica del panel (sin contraseña queda público) |
+| `DASHBOARD_PORT`, `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Puerto y autenticación básica opcional del panel; sin `DASHBOARD_PASSWORD` el panel es público (así está la demo) |
 | `PUBLIC_WHATSAPP_NUMBER` | Número que muestra la landing `/contacto.html` aunque WhatsApp esté desconectado (opcional) |
 | `HANDOVER_TIMEOUT_MIN` | Minutos sin respuesta del operador antes de que la IA retome (0 = nunca) |
 | `HOLD_OPERATOR_IDLE_MIN`, `HOLD_COOLDOWN_MIN` | Aviso de espera en modo operador: minutos de inactividad (3) y separación mínima entre avisos (5) |
@@ -256,7 +263,7 @@ Reinicia el proceso al guardar cambios. Para ver el panel con datos, ejecuta ant
 | `npm test` | Pruebas con `node:test` |
 | `npm run check` | Lint y pruebas |
 | `npm run tunnel` | Expone el panel local con un túnel de Cloudflare (requiere `cloudflared`) |
-| `npm run deploy:azure` | Construye la imagen en Azure y publica la Web App |
+| `npm run deploy:azure` | Construye la imagen con Docker, la sube a Azure Container Registry y publica la Web App |
 
 ### Antes de una demo
 
@@ -289,13 +296,14 @@ El bot usa *long polling*, así que el servicio debe estar siempre encendido; no
 npm run deploy:azure
 ```
 
-`scripts/deploy-azure.sh` crea (o reutiliza) el grupo `rg-ctt-fisei-agente` en `eastus2`, un Azure Container Registry Basic, un plan Linux B2 (2 núcleos; con B1 la CPU llega al 99 % al vincular WhatsApp y el teléfono cancela) y la Web App `ctt-fisei-asistente`. La imagen se construye con Docker local y se sube al registro (Azure for Students no permite `az acr build`), la app queda *Always On* y los secretos de `.env` pasan a la configuración de la app. Si `.env` no trae `DASHBOARD_PASSWORD`, se genera una. Volver a ejecutarlo publica la versión actual del código.
+`scripts/deploy-azure.sh` crea (o reutiliza) el grupo `rg-ctt-fisei-agente` en `eastus2`, un Azure Container Registry Basic, un plan Linux B2 (2 núcleos; con B1 la CPU llega al 99 % al vincular WhatsApp y el teléfono cancela) y la Web App `ctt-fisei-asistente`. La imagen se construye con Docker local y se sube al registro (Azure for Students no permite `az acr build`), la app queda *Always On* y los secretos de `.env` pasan a la configuración de la app. Si `.env` no trae `DASHBOARD_PASSWORD`, el panel queda público. Volver a ejecutarlo publica la versión actual del código.
 
 | Configuración en Azure | Por qué |
 | :--- | :--- |
 | `DB_PATH=/home/data/agente.db`, `SQLITE_JOURNAL=DELETE` | `/home` es persistente pero es un disco de red, donde WAL no es seguro |
 | `WWEBJS_DATA_PATH=/tmp/wwebjs` | Chrome no puede guardar su perfil en `/home`; tras cada reinicio hay que volver a escanear el QR de WhatsApp |
 | `WEBSITES_PORT=3000` | Puerto del contenedor |
+| `PUBLIC_WHATSAPP_NUMBER` | Número que la landing muestra aunque WhatsApp esté desconectado |
 
 **Render**: crea un *Blueprint* apuntando a este repositorio. `render.yaml` define un servicio Docker con disco persistente en `/app/storage` (SQLite y sesión de WhatsApp) y health check en `/api/status`. Define en Render: `LLM_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DASHBOARD_PASSWORD` y, si usas voz, `STT_API_KEY`. La plataforma inyecta `PORT` y la aplicación lo respeta.
 
@@ -311,6 +319,20 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 ---
 
 ## 🔧 Detalles Técnicos
+
+### Cumplimiento de la rúbrica
+
+| Criterio | Cómo se cumple | Dónde verlo |
+| :--- | :--- | :--- |
+| Persuasión y tono humano | Prompt de "Sofía" con perfilado, playbook de objeciones (precio, "en YouTube es gratis", tiempo, nivel, desconfianza), idioma del usuario y una pregunta a la vez | `src/agent/prompt.js`; probar en el bot |
+| Intención y derivación | Cierre con formulario prellenado; `transferir_a_asesor` para becas, descuentos, convenios, reclamos y dudas académicas; pausa por frustración o pedido de humano | `src/agent/tools.js`, `src/core/conversation-service.js`; tabla de reglas de handover |
+| Resiliencia e inyecciones | Guardas antes y después del LLM: inyección (incluye leetspeak e inglés), contención sin LLM en casos graves, precios validados contra el catálogo, faltas ortográficas y protocolo de riesgo | `src/core/guard.js`, `test/guard-adversarial.test.js`, `npm run eval` |
+| Sincronización en tiempo real | Server-Sent Events: bandeja, mensajes y estado de canales sin recargar | `/api/events`; panel en vivo |
+| Handover y pausa de IA | "Tomar control" y "Devolver a la IA", el mensaje del operador sale por el mismo bot, aviso de espera y reanudación automática | Pestaña Bandeja en vivo |
+| UI/UX y termómetro | Termómetro (nuevo, interesado, dudoso, frustrado, lead caliente) en cada tarjeta, filtros, alertas sonoras, plantillas rápidas e identidad del CTT | Capturas y panel |
+| Diseño modular | Canales, servicio de conversación, inferencia, guardas y persistencia en carpetas separadas | Sección Arquitectura |
+| Tokens y contexto | Catálogo compacto en el prompt, detalle por herramienta, historial acotado con resumen y respaldo entre modelos | Sección Gestión de tokens y contexto |
+| Valor agregado | Notas de voz, resúmenes para el operador, métricas y gráficas, landing con QR, WhatsApp vinculable desde el panel y formulario prellenado | Pestañas Métricas y Cursos, `/contacto.html` |
 
 ### API del panel
 
@@ -332,7 +354,7 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 | `POST` | `/api/whatsapp/logout` | Desvincula el teléfono y borra la sesión |
 | `POST` | `/api/courses/refresh` | Fuerza el refresco del catálogo |
 
-Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden autenticación básica, salvo `/contacto.html`, sus archivos, `/img/` y `/api/public/*`.
+Todas las rutas responden con CORS abierto. Si se define `DASHBOARD_PASSWORD`, piden autenticación básica, salvo `/contacto.html`, sus archivos, `/img/` y `/api/public/*`. En la demo no hay contraseña.
 
 ### Reglas de handover
 
@@ -348,16 +370,18 @@ Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden a
 
 ### Seguridad frente a prompt injection
 
-- `guard.inspectInput` marca `inyeccion`, `descuento_indebido`, `pide_humano`, `frustracion` (incluye insultos) y `riesgo` antes de llamar al LLM; los intentos quedan registrados como eventos y se ven en el panel.
-- Cuando hay bandera, el turno del usuario lleva una nota del sistema que el modelo debe respetar.
+- `guard.inspectInput` normaliza tildes, leetspeak y letras separadas, y marca `inyeccion`, `inyeccion_alta`, `descuento_indebido`, `pide_humano`, `frustracion` (incluye insultos) y `riesgo` antes de llamar al LLM. Los intentos quedan registrados como eventos y se ven en el panel.
+- Con `inyeccion_alta` (revelar el prompt, modo DAN, etiquetas `[SYSTEM]`, falsa autoridad que ordena descuentos) el texto no llega al modelo: se responde con un mensaje fijo de contención.
+- Con el resto de banderas, el turno del usuario lleva una nota del sistema que el modelo debe respetar.
 - El prompt fija las reglas de seguridad como prioridad máxima: no hay cursos gratis, cupones ni descuentos fuera de las tarifas publicadas.
-- `guard.checkOutput` bloquea respuestas que prometan descuentos, cupones o revelen instrucciones, y las reemplaza por una respuesta segura.
+- `guard.outputViolation` revisa cada respuesta: bloquea promesas de descuento, cupones o filtraciones de instrucciones, y compara los montos citados con los precios del catálogo. Si hay un monto inventado, pide una corrección al modelo una vez y, si persiste, responde con un mensaje seguro.
 
 ### Gestión de tokens y contexto
 
 - El prompt lleva un catálogo de una línea por curso; el detalle completo se pide con `ver_curso` solo cuando hace falta.
-- El historial se limita a los últimos 10 mensajes y a 6000 caracteres; lo anterior se resume con el analizador y entra como contexto.
-- Los mensajes del usuario se recortan a 1500 caracteres; el historial, el resumen y el perfil comparten un tope de 6000 caracteres, y las respuestas un máximo de 1200 tokens (incluye el razonamiento de `gpt-oss`).
+- El historial se limita a los últimos 10 mensajes; junto con el resumen y el perfil del prospecto comparten un tope de 6000 caracteres, y lo más antiguo queda en el resumen que escribe el analizador.
+- Los mensajes del usuario se recortan a 1500 caracteres y las respuestas tienen un máximo de 1200 tokens (incluye el razonamiento de `gpt-oss`).
+- Si un modelo de Groq llega a su límite de tokens por minuto (429), la llamada pasa al siguiente modelo de `LLM_MODEL`.
 - El análisis del prospecto corre después de responder, así que no suma latencia.
 - Cada respuesta guarda latencia y tokens; el panel muestra el promedio de tokens por respuesta.
 
@@ -365,11 +389,13 @@ Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden a
 
 El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el HTML no se publican, por eso se ignoran. El servidor de la UTA no envía el certificado intermedio de Sectigo, así que se incluye en `src/scraper/certs/`. Si la web no responde, se usa `data/courses.json`.
 
-### Pendiente de confirmar
+### Limitaciones conocidas
 
 - El plan gratis de Groq limita a 8000 tokens por minuto por modelo; por eso `LLM_MODEL` encadena tres modelos. Con muchas personas a la vez conviene el plan Dev de Groq.
 - La web del CTT muestra dos direcciones distintas (Río Payamino y Río Guayllabamba); el agente solo menciona "FISEI, Campus Huachi, Av. Los Chasquis".
 - Varios cursos figuran como "ABIERTO" en la web aunque su inscripción ya venció; el estado real se calcula con las fechas (`registrationStatus`) y el bot solo ofrece inscripción en los vigentes.
+- En Azure la sesión de WhatsApp vive en el disco temporal del contenedor: tras un redespliegue hay que volver a escanear el QR desde el panel.
+- whatsapp-web.js no es una API oficial de WhatsApp; conviene vincular un número dedicado al bot.
 
 ---
 
@@ -387,9 +413,12 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - [x] Despliegue en Azure App Service
 - [x] Vinculación de WhatsApp con QR desde el panel
 - [x] Protocolo de contención ante riesgo para la persona
+- [x] Evaluaciones automáticas de calidad de respuestas (`npm run eval`) y chequeo previo a la demo (`npm run demo:check`)
+- [x] Landing pública con QR de Telegram y WhatsApp
+- [x] Formulario de inscripción prellenado
+- [x] Alertas sonoras, plantillas rápidas y gráficas de tendencia en el panel
 - [ ] Varios operadores con asignación de conversaciones
 - [ ] Notificaciones push al operador cuando la IA se pausa
-- [x] Evaluaciones automáticas de calidad de respuestas (`npm run eval`) y chequeo previo a la demo (`npm run demo:check`)
 
 ---
 
@@ -419,4 +448,4 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 
 ## ✍️ Autor
 
-kiramman-mp3
+kiramman-mp3, con contribuciones de Dayle Garcia.

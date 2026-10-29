@@ -1,4 +1,5 @@
 import express from 'express';
+import QRCode from 'qrcode';
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as analytics from '../db/analytics.js';
@@ -6,7 +7,7 @@ import { TOPIC_LABELS } from '../db/topics.js';
 import { getCourses, getCoursesUpdatedAt, refreshCourses } from '../scraper/courses.js';
 import { whatsappState } from '../channels/whatsapp.js';
 import { openCourses } from '../channels/common.js';
-import { registrationStatus } from '../agent/tools.js';
+import { registrationStatus, isOfferable } from '../agent/tools.js';
 import { bus } from '../core/events.js';
 
 const safeEqual = (a, b) => {
@@ -50,14 +51,53 @@ function filters(req) {
   return { since, channel };
 }
 
-export function createDashboard({ store, service, auth, telegramInfo, whatsapp = null }) {
+export function createDashboard({ store, service, auth, telegramInfo, whatsapp = null, publicWhatsAppNumber = '' }) {
   const app = express();
   const db = store.db;
   app.disable('x-powered-by');
   app.use(cors);
+
+  // ---------- Rutas públicas (landing de contacto): no piden la contraseña del panel ----------
+  const publicDir = fileURLToPath(new URL('./public', import.meta.url));
+  const PUBLIC_FILES = new Set(['/contacto.html', '/contacto.css', '/contacto.js']);
+  const publicStatic = express.static(publicDir);
+  app.use((req, res, next) => (PUBLIC_FILES.has(req.path) || req.path.startsWith('/img/') ? publicStatic(req, res, next) : next()));
+
+  const qr = (url) => QRCode.toDataURL(url, { margin: 1, width: 440, color: { dark: '#012e5a', light: '#ffffff' } });
+
+  app.get('/api/public/contact', async (_req, res) => {
+    const tg = telegramInfo();
+    const number = publicWhatsAppNumber || whatsappState.number || null;
+    const telegramUrl = tg ? `https://t.me/${tg.username}` : null;
+    const whatsappUrl = number ? `https://wa.me/${number}` : null;
+    res.json({
+      telegram: tg && { username: tg.username, url: telegramUrl, qr: await qr(telegramUrl) },
+      whatsapp: whatsappUrl && { number, url: whatsappUrl, online: whatsappState.status === 'conectado', qr: await qr(whatsappUrl) },
+    });
+  });
+
+  // Solo datos públicos de la oferta vigente (lo mismo que muestra la web del CTT).
+  app.get('/api/public/courses', (_req, res) => {
+    res.json(
+      getCourses()
+        .map((c) => ({ c, registration: registrationStatus(c) }))
+        .filter(({ registration }) => isOfferable(registration))
+        .map(({ c, registration }) => ({
+          id: c.id,
+          name: c.name,
+          hours: c.hours,
+          registration,
+          modality: c.details?.['Modalidad'] ?? null,
+          courseDates: c.details?.['Fecha del curso'] ?? null,
+          url: c.url,
+        })),
+    );
+  });
+
+  // ---------- Panel del operador: requiere autenticación ----------
   app.use(basicAuth(auth));
   app.use(express.json({ limit: '32kb' }));
-  app.use(express.static(fileURLToPath(new URL('./public', import.meta.url))));
+  app.use(express.static(publicDir));
 
   const status = () => {
     const courses = getCourses();

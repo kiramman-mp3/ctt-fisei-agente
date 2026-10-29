@@ -167,7 +167,7 @@ main {
   font-size: 1.05rem;
 }
 
-.qr-card canvas {
+.qr-card .qr {
   width: min(220px, 70vw);
   height: auto;
   border: 1px solid var(--line);

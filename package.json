@@ -13,6 +13,8 @@
     "scrape": "node src/scraper/run.js",
     "models": "node src/agent/list-models.js",
     "seed": "node src/db/seed.js",
+    "eval": "node scripts/eval-agent.js",
+    "demo:check": "node scripts/demo-check.js",
     "lint": "eslint .",
     "test": "node --test",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",

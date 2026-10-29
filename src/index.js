@@ -51,6 +51,7 @@ const app = createDashboard({
   store,
   service,
   whatsapp,
+  publicWhatsAppNumber: config.whatsapp.publicNumber,
   auth: config.dashboard,
   telegramInfo: () => (telegramInfo ? { username: telegramInfo.username } : null),
 });

@@ -107,6 +107,7 @@ az webapp config appsettings set -n "$APP" -g "$RG" -o none --settings \
   DASHBOARD_USER="$DASHBOARD_USER" \
   DASHBOARD_PASSWORD="$DASHBOARD_PASSWORD" \
   HANDOVER_TIMEOUT_MIN="$(env_value HANDOVER_TIMEOUT_MIN)" \
+  PUBLIC_WHATSAPP_NUMBER="$(env_value PUBLIC_WHATSAPP_NUMBER)" \
   WHATSAPP_ENABLED=false
 
 az webapp restart -n "$APP" -g "$RG" -o none

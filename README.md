@@ -50,6 +50,8 @@ Para el personal de coordinación y ventas del CTT-FISEI, que necesita atender a
 | :---: | :---: |
 | <img width="420" src="docs/capturas/bandeja.png" alt="Bandeja en vivo"> | <img width="420" src="docs/capturas/metricas.png" alt="Métricas"> |
 | <sub>Bandeja en vivo: termómetro, modo IA/operador, resumen y respuesta del operador.</sub> | <sub>Métricas: leads, derivaciones, manipulaciones bloqueadas, temas y cursos.</sub> |
+| <img width="420" src="docs/capturas/cursos.png" alt="Pestaña Cursos"> | <img width="420" src="docs/capturas/contacto.png" alt="Landing pública de contacto"> |
+| <sub>Cursos: estado real de inscripción, fechas, precios y formulario.</sub> | <sub>Landing pública: QR de Telegram y WhatsApp y cursos vigentes.</sub> |
 
 Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas reales).
 
@@ -70,6 +72,7 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 - **Tolerancia a faltas ortográficas**: la búsqueda de cursos usa distancia de edición ("pyton", "arduno").
 - **Notas de voz**: transcripción con cualquier endpoint compatible con `/audio/transcriptions` (por ejemplo Groq Whisper).
 - **Identidad del CTT**: el panel usa el logo, la tipografía y los colores del sitio oficial; la cabecera de cada conversación es un póster de curso, marino cuando atiende la IA y carmesí cuando atiende un operador.
+- **Landing pública de contacto**: `/contacto.html` muestra los QR de Telegram y WhatsApp (generados por el servidor con el bot y el número reales) y los cursos con inscripción vigente; no pide la contraseña del panel.
 - **Pestaña Cursos**: el panel muestra el catálogo como pósters con el estado real de inscripción (abierta, por abrir, vencida o cerrada), fechas, modalidad, precios y el formulario; se puede sincronizar con la web en un clic.
 - **Panel en tiempo real**: Server-Sent Events, sin recargar la página; API abierta a cualquier origen (CORS).
 - **Métricas**: personas atendidas, leads calientes, derivaciones, manipulaciones bloqueadas, latencia, tokens por respuesta, temas, cursos y horarios.
@@ -200,6 +203,7 @@ cp .env.example .env
 | `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL` | Transcripción de voz (opcional, por defecto Groq Whisper) |
 | `WHATSAPP_ENABLED`, `CHROME_PATH`, `WWEBJS_DATA_PATH` | Conectar WhatsApp al arrancar, ejecutable de Chrome y carpeta de la sesión |
 | `DASHBOARD_PORT`, `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Puerto y autenticación básica del panel (sin contraseña queda público) |
+| `PUBLIC_WHATSAPP_NUMBER` | Número que muestra la landing `/contacto.html` aunque WhatsApp esté desconectado (opcional) |
 | `HANDOVER_TIMEOUT_MIN` | Minutos sin respuesta del operador antes de que la IA retome (0 = nunca) |
 | `DB_PATH`, `SQLITE_JOURNAL`, `COURSES_REFRESH_HOURS` | Ruta de SQLite, modo de diario (`WAL` por defecto, `DELETE` en discos de red) y frecuencia de refresco del catálogo |
 
@@ -223,7 +227,7 @@ npm run scrape
 npm start
 ```
 
-El panel queda en `http://localhost:3000` y el bot de Telegram empieza a responder. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
+El panel queda en `http://localhost:3000` y el bot de Telegram empieza a responder. La landing pública de contacto con QR está en `http://localhost:3000/contacto.html`. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
 
 ### Desarrollo
 
@@ -239,12 +243,24 @@ Reinicia el proceso al guardar cambios. Para ver el panel con datos, ejecuta ant
 | `npm run dev` | Igual que `start`, con recarga automática |
 | `npm run scrape` | Descarga el catálogo y actualiza `data/courses.json` |
 | `npm run models` | Lista los modelos del proveedor configurado |
-| `npm run seed` | Crea 60 conversaciones de ejemplo en la base configurada |
+| `npm run seed` | Crea 4 guiones `[demo]` + 60 conversaciones de ejemplo en la base configurada |
+| `npm run eval` | Batería de evaluación del agente (PASS/FAIL; sale ≠0 si falla) |
+| `npm run demo:check` | Chequeo previo a la demo: entorno, catálogo, health opcional y guiones |
 | `npm run lint` | ESLint sobre todo el proyecto |
 | `npm test` | Pruebas con `node:test` |
 | `npm run check` | Lint y pruebas |
 | `npm run tunnel` | Expone el panel local con un túnel de Cloudflare (requiere `cloudflared`) |
 | `npm run deploy:azure` | Construye la imagen en Azure y publica la Web App |
+
+### Antes de una demo
+
+```bash
+npm run demo:check
+npm run seed
+npm run eval
+```
+
+`demo:check` verifica `LLM_API_KEY`, el catálogo en `data/courses.json` (totales y ofertables) y, si defines `BASE_URL` (p. ej. `http://localhost:3000`), que `GET /api/status` responda. Lista los cuatro guiones etiquetados `[demo]` del seed: objeción de precio, inyección bloqueada, handover por frustración y lead caliente. `eval` ejercita el agente real (~18 casos de rúbrica + ataques) con chats aislados, imprime PASS/FAIL y limpia los datos de prueba.
 
 ### Comandos del bot
 
@@ -284,7 +300,7 @@ docker build -t ctt-fisei-agente .
 docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-agente
 ```
 
-**Demo desde una laptop**: `npm start` y en otra terminal `npm run tunnel`; Cloudflare devuelve una URL pública `https://*.trycloudflare.com` para el panel.
+**Demo desde una laptop**: `npm start` y en otra terminal `npm run tunnel`; Cloudflare devuelve una URL pública `https://*.trycloudflare.com` para el panel. Antes de enseñarlo, corre `npm run demo:check` (con `BASE_URL` apuntando al panel si ya está arriba) y, si quieres datos en la bandeja, `npm run seed`.
 
 ---
 
@@ -301,13 +317,15 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 | `POST` | `/api/conversations/:userId/mode` | `{ mode: "ai" \| "human" }`: tomar control o devolver a la IA |
 | `POST` | `/api/conversations/:userId/read` | Marca la conversación como leída |
 | `GET` | `/api/overview?range=&channel=` | Métricas agregadas |
+| `GET` | `/api/public/contact` | Público: bot de Telegram, número de WhatsApp y sus QR para la landing |
+| `GET` | `/api/public/courses` | Público: cursos con inscripción abierta o por abrir |
 | `GET` | `/api/courses` | Catálogo con estado real de inscripción, ordenado por disponibilidad |
 | `GET` | `/api/status` | Estado de Telegram, WhatsApp (incluye QR) y catálogo |
 | `POST` | `/api/whatsapp/start` | Abre WhatsApp Web y publica el QR por SSE |
 | `POST` | `/api/whatsapp/logout` | Desvincula el teléfono y borra la sesión |
 | `POST` | `/api/courses/refresh` | Fuerza el refresco del catálogo |
 
-Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden autenticación básica.
+Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden autenticación básica, salvo `/contacto.html`, sus archivos, `/img/` y `/api/public/*`.
 
 ### Reglas de handover
 
@@ -364,7 +382,7 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - [x] Protocolo de contención ante riesgo para la persona
 - [ ] Varios operadores con asignación de conversaciones
 - [ ] Notificaciones push al operador cuando la IA se pausa
-- [ ] Evaluaciones automáticas de calidad de respuestas
+- [x] Evaluaciones automáticas de calidad de respuestas (`npm run eval`) y chequeo previo a la demo (`npm run demo:check`)
 
 ---
 

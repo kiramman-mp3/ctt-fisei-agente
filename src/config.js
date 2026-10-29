@@ -29,6 +29,8 @@ export const config = {
     enabled: env.WHATSAPP_ENABLED === 'true',
     chromePath: env.CHROME_PATH || undefined,
     dataPath: env.WWEBJS_DATA_PATH || '.wwebjs_auth',
+    // Número que muestra la landing pública aunque la sesión esté desconectada (sin + ni espacios).
+    publicNumber: (env.PUBLIC_WHATSAPP_NUMBER ?? '').replace(/\D/g, ''),
   },
   dashboard: {
     port: Number(env.PORT || env.DASHBOARD_PORT || 3000),

@@ -6,6 +6,7 @@
 [![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://nodejs.org/api/sqlite.html)
 [![Telegram](https://img.shields.io/badge/Telegram-grammY-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://grammy.dev/)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-whatsapp--web.js-25D366?style=flat-square&logo=whatsapp&logoColor=white)](https://wwebjs.dev/)
+[![Azure](https://img.shields.io/badge/Azure-App%20Service-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/azure/app-service/)
 
 **Asistente de Cursos CTT-FISEI** es un agente conversacional con IA que atiende por Telegram y WhatsApp a las personas interesadas en los cursos del Centro de Transferencia y Desarrollo de Tecnologías (CTT) de la FISEI. Informa, perfila al prospecto, responde objeciones, comparte el enlace de inscripción y, cuando hace falta, pasa la conversación a una persona. Incluye un panel de mando web en tiempo real para que el equipo del CTT supervise e intervenga.
 
@@ -92,7 +93,7 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 - **Backend**: Node.js (ESM), Express 5, grammY, whatsapp-web.js, SDK `openai` contra un proveedor compatible (por defecto Groq con `gpt-oss-120b`; también funciona con xAI), cheerio y undici para el scraping.
 - **Base de datos**: SQLite con el módulo nativo `node:sqlite` (sin dependencias nativas).
 - **Pruebas**: `node:test` (unitarias e integración del servicio, guardas adversariales, panel y prellenado), batería de evaluación contra el LLM real (`npm run eval`) y ESLint 10.
-- **Despliegue**: Docker (Node 24 + Chromium), blueprint de Render y túnel de Cloudflare para demos locales.
+- **Despliegue**: Docker (Node 24 + Chromium) en Azure App Service con Azure Container Registry; también blueprint de Render y túnel de Cloudflare para demos locales.
 
 ---
 
@@ -165,6 +166,7 @@ Los conectores de mensajería solo traducen eventos del canal; toda la lógica d
 ├── test/                           # Pruebas node:test y fixtures HTML
 ├── docs/capturas/                  # Capturas del panel
 ├── scripts/
+│   ├── deploy-azure.sh             # Despliegue en Azure App Service
 │   ├── set-operator.js             # Crea operadores o cambia contraseñas (npm run operator)
 │   ├── eval-agent.js               # Batería de evaluación del agente (npm run eval)
 │   └── demo-check.js               # Chequeo previo a la demo (npm run demo:check)
@@ -214,7 +216,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | Token de @BotFather |
 | `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL` | Transcripción de voz (opcional, por defecto Groq Whisper) |
 | `WHATSAPP_ENABLED`, `CHROME_PATH`, `WWEBJS_DATA_PATH` | Conectar WhatsApp al arrancar, ejecutable de Chrome y carpeta de la sesión |
-| `DASHBOARD_PORT` | Puerto del panel (si la plataforma inyecta `PORT`, se usa ese) |
+| `DASHBOARD_PORT` | Puerto del panel (en Azure se usa `PORT`) |
 | `PUBLIC_WHATSAPP_NUMBER` | Número que muestra la landing `/contacto.html` aunque WhatsApp esté desconectado (opcional) |
 | `HANDOVER_TIMEOUT_MIN` | Minutos sin respuesta del operador antes de que la IA retome (0 = nunca) |
 | `HOLD_OPERATOR_IDLE_MIN`, `HOLD_COOLDOWN_MIN` | Aviso de espera en modo operador: minutos de inactividad (3) y separación mínima entre avisos (5) |
@@ -265,6 +267,7 @@ Reinicia el proceso al guardar cambios. Para ver el panel con datos, ejecuta ant
 | `npm test` | Pruebas con `node:test` |
 | `npm run check` | Lint y pruebas |
 | `npm run tunnel` | Expone el panel local con un túnel de Cloudflare (requiere `cloudflared`) |
+| `npm run deploy:azure` | Construye la imagen con Docker, la sube a Azure Container Registry y publica la Web App |
 
 ### Antes de una demo
 
@@ -290,6 +293,22 @@ npm run eval
 ## ☁️ Despliegue
 
 El bot usa *long polling*, así que el servicio debe estar siempre encendido; no sirve un entorno serverless que se duerme. Solo debe correr **una** instancia a la vez: dos procesos con el mismo token de Telegram se quitan los mensajes entre sí.
+
+**Azure App Service**: con Azure CLI y sesión iniciada (`az login`), y un `.env` con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN`:
+
+
+```bash
+npm run deploy:azure
+```
+
+`scripts/deploy-azure.sh` crea (o reutiliza) el grupo `rg-ctt-fisei-agente` en `eastus2`, un Azure Container Registry Basic, un plan Linux B2 (2 núcleos; con B1 la CPU llega al 99 % al vincular WhatsApp y el teléfono cancela) y la Web App `ctt-fisei-asistente`. La imagen se construye con Docker local y se sube al registro (Azure for Students no permite `az acr build`), la app queda *Always On* y los secretos de `.env` pasan a la configuración de la app. Volver a ejecutarlo publica la versión actual del código.
+
+| Configuración en Azure | Por qué |
+| :--- | :--- |
+| `DB_PATH=/home/data/agente.db`, `SQLITE_JOURNAL=DELETE` | `/home` es persistente pero es un disco de red, donde WAL no es seguro |
+| `WWEBJS_DATA_PATH=/tmp/wwebjs` | Chrome no puede guardar su perfil en `/home`; tras cada reinicio hay que volver a escanear el QR de WhatsApp |
+| `WEBSITES_PORT=3000` | Puerto del contenedor |
+| `PUBLIC_WHATSAPP_NUMBER` | Número que la landing muestra aunque WhatsApp esté desconectado |
 
 **Render**: crea un *Blueprint* apuntando a este repositorio. `render.yaml` define un servicio Docker con disco persistente en `/app/storage` (SQLite y sesión de WhatsApp) y health check en `/api/status`. Define en Render: `LLM_API_KEY`, `TELEGRAM_BOT_TOKEN` y, si usas voz, `STT_API_KEY`. La plataforma inyecta `PORT` y la aplicación lo respeta.
 
@@ -403,7 +422,7 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - El plan gratis de Groq limita a 8000 tokens por minuto por modelo; por eso `LLM_MODEL` encadena tres modelos. Con muchas personas a la vez conviene el plan Dev de Groq.
 - La web del CTT muestra dos direcciones distintas (Río Payamino y Río Guayllabamba); el agente solo menciona "FISEI, Campus Huachi, Av. Los Chasquis".
 - Varios cursos figuran como "ABIERTO" en la web aunque su inscripción ya venció; el estado real se calcula con las fechas (`registrationStatus`) y el bot solo ofrece inscripción en los vigentes.
-- Si la sesión de WhatsApp se guarda en un disco temporal del contenedor, tras un redespliegue hay que volver a escanear el QR desde el panel.
+- En Azure la sesión de WhatsApp vive en el disco temporal del contenedor: tras un redespliegue hay que volver a escanear el QR desde el panel.
 - whatsapp-web.js no es una API oficial de WhatsApp; conviene vincular un número dedicado al bot.
 
 ---
@@ -419,6 +438,7 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - [x] Defensa contra prompt injection y validación de salida
 - [x] Transcripción de notas de voz
 - [x] Docker y blueprint de Render
+- [x] Despliegue en Azure App Service
 - [x] Vinculación de WhatsApp con QR desde el panel
 - [x] Protocolo de contención ante riesgo para la persona
 - [x] Evaluaciones automáticas de calidad de respuestas (`npm run eval`) y chequeo previo a la demo (`npm run demo:check`)

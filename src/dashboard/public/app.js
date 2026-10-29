@@ -316,6 +316,60 @@
     // Sin almacenamiento local se usa la vista compacta.
   }
 
+  /** Eliminar en dos pasos: el primer clic pide confirmación durante unos segundos. */
+  function deleteButton(c) {
+    let armed = null;
+    return el(
+      'button',
+      {
+        type: 'button',
+        class: 'head-delete',
+        title: 'Eliminar esta conversación y sus mensajes',
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          if (!armed) {
+            btn.classList.add('armed');
+            btn.textContent = 'Confirmar eliminación';
+            armed = setTimeout(() => {
+              armed = null;
+              btn.classList.remove('armed');
+              btn.textContent = 'Eliminar chat';
+            }, 4000);
+            return;
+          }
+          clearTimeout(armed);
+          btn.disabled = true;
+          btn.textContent = 'Eliminando…';
+          try {
+            await api(`/api/conversations/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
+            removeConversation(c.id);
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = `No se pudo eliminar: ${err.message}`;
+          }
+        },
+      },
+      'Eliminar chat',
+    );
+  }
+
+  /** Quita la conversación de la bandeja y, si estaba abierta, vuelve al estado vacío. */
+  function removeConversation(userId) {
+    inbox = inbox.filter((x) => x.user_id !== userId);
+    if (selected === userId) {
+      selected = null;
+      $('chat').replaceChildren(
+        el(
+          'div',
+          { class: 'empty' },
+          el('h2', {}, 'Conversación eliminada'),
+          el('p', {}, 'Elige otra conversación de la bandeja. Si la persona vuelve a escribir, se abrirá un chat nuevo.'),
+        ),
+      );
+    }
+    renderInbox();
+  }
+
   function renderChatHead(c) {
     const profile = c.profile || {};
     const tags = [
@@ -355,7 +409,7 @@
         'div',
         { class: 'row' },
         el('div', { class: 'head-title' }, el('h2', {}, displayName(c)), stateChip(c.state), modeChip(c.mode)),
-        el('div', { class: 'head-actions' }, toggle, take),
+        el('div', { class: 'head-actions' }, deleteButton(c), toggle, take),
       ),
       el(
         'div',
@@ -1004,6 +1058,7 @@
       reloadInbox(m.user_id);
       reloadMetrics();
     });
+    source.addEventListener('deleted', (e) => removeConversation(JSON.parse(e.data).id));
     source.addEventListener('conversation', (e) => {
       const c = JSON.parse(e.data);
       if (!inbox.some((x) => x.user_id === c.id)) {

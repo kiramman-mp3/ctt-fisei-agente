@@ -912,6 +912,26 @@ main {
   padding: 8px 16px;
 }
 
+/* Eliminar: discreto hasta que se arma la confirmación. */
+.head-delete {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: rgb(255 255 255 / 0.8);
+  font-size: 12px;
+  font-weight: 500;
+}
+.head-delete:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: #ffffff;
+}
+.head-delete.armed {
+  background: #ffffff;
+  color: var(--critical);
+  font-weight: 600;
+}
+
 /* ---------- Cursos ---------- */
 .courses-head {
   display: flex;

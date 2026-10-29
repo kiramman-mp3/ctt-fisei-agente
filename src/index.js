@@ -19,9 +19,26 @@ const service = new ConversationService({
   agent: new CourseAgent(),
   analyzer: config.llm.apiKey ? new ProspectAnalyzer() : null,
   handoverTimeoutMin: config.handoverTimeoutMin,
+  holdOperatorIdleMin: config.holdOperatorIdleMin,
+  holdCooldownMin: config.holdCooldownMin,
 });
 const transcriber = config.stt.apiKey ? new Transcriber(config.stt) : null;
 if (!transcriber) console.warn('[voz] STT_API_KEY no configurado; las notas de voz no se transcribirán.');
+
+// Keep-alive opcional: evita que el host se duerma haciendo GET periódico.
+let keepaliveTimer = null;
+if (config.keepaliveUrl) {
+  const ping = () =>
+    fetch(config.keepaliveUrl)
+      .then((res) => {
+        if (!res.ok) console.warn(`[keepalive] ${res.status} ${config.keepaliveUrl}`);
+      })
+      .catch((err) => console.warn(`[keepalive] ${err.message}`));
+  ping();
+  keepaliveTimer = setInterval(ping, 10 * 60_000);
+  if (typeof keepaliveTimer.unref === 'function') keepaliveTimer.unref();
+  console.log(`[keepalive] ping cada 10 min → ${config.keepaliveUrl}`);
+}
 
 let telegramInfo = null;
 let telegram = null;
@@ -62,6 +79,7 @@ const server = app.listen(config.dashboard.port, () => {
 
 async function shutdown() {
   console.log('Cerrando...');
+  if (keepaliveTimer) clearInterval(keepaliveTimer);
   server.close();
   await Promise.allSettled([telegram?.stop(), whatsapp?.stop()]);
   store.close();

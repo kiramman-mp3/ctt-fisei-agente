@@ -4,7 +4,21 @@ import { inspectInput, RISK_REPLY } from './guard.js';
 export const HANDOVER_REPLY =
   'Entiendo, te comunico con un asesor del CTT-FISEI 🙌. En unos momentos te escribirá por este mismo chat.';
 
+export const HOLD_REPLY_ES =
+  '¡Recibido! Un asesor del CTT ya revisa tu conversación y te responde en unos minutos';
+
+export const HOLD_REPLY_EN =
+  'Got it! A CTT advisor is already reviewing your conversation and will reply in a few minutes';
+
 const MAX_INPUT_CHARS = 1500;
+
+/** Detección ligera de inglés (sin LLM): palabras comunes y sin signos del español. */
+export function looksEnglish(text) {
+  if (/[áéíóúüñ¿¡]/i.test(text)) return false;
+  return /\b(the|you|please|hello|hi|hey|thanks|thank|want|need|can|could|would|help|course|price|yes|no|ok|okay|waiting|anyone|there|hello)\b/i.test(
+    text,
+  );
+}
 
 /**
  * Orquesta cada conversación: persiste los mensajes, decide si responde la IA
@@ -12,11 +26,22 @@ const MAX_INPUT_CHARS = 1500;
  * publica los cambios en el bus de eventos para el dashboard.
  */
 export class ConversationService {
-  constructor({ store, agent, analyzer = null, handoverTimeoutMin = 15 }) {
+  constructor({
+    store,
+    agent,
+    analyzer = null,
+    handoverTimeoutMin = 15,
+    holdOperatorIdleMin = 3,
+    holdCooldownMin = 5,
+    now = () => Date.now(),
+  }) {
     this.store = store;
     this.agent = agent;
     this.analyzer = analyzer;
     this.handoverTimeoutMs = handoverTimeoutMin * 60_000;
+    this.holdOperatorIdleMs = holdOperatorIdleMin * 60_000;
+    this.holdCooldownMs = holdCooldownMin * 60_000;
+    this.now = now;
     this.senders = new Map();
   }
 
@@ -37,7 +62,7 @@ export class ConversationService {
 
   /**
    * Procesa un mensaje entrante. Devuelve los textos que el canal debe enviar
-   * (vacío cuando la conversación está a cargo de un operador).
+   * (vacío cuando la conversación está a cargo de un operador y no aplica aviso).
    */
   async handleIncoming({ channel, externalId, name, text }) {
     const userId = this.store.upsertUser({ channel, externalId, name });
@@ -62,8 +87,9 @@ export class ConversationService {
       conversation = this.setMode(userId, 'ai', 'Sin respuesta del operador: la IA retoma la conversación');
     }
     if (conversation.mode === 'human') {
+      const hold = this.maybeHoldReply(userId, channel, content);
       this.emitConversation(userId);
-      return [];
+      return hold ? [hold] : [];
     }
 
     if (flags.includes('pide_humano') || flags.includes('frustracion')) {
@@ -74,7 +100,7 @@ export class ConversationService {
       return [HANDOVER_REPLY];
     }
 
-    const started = Date.now();
+    const started = this.now();
     try {
       const result = await this.agent.respond({
         channel,
@@ -90,7 +116,7 @@ export class ConversationService {
         role: 'assistant',
         content: result.answer,
         courses: result.courses,
-        latencyMs: Date.now() - started,
+        latencyMs: this.now() - started,
         tokensIn: result.usage.in,
         tokensOut: result.usage.out,
         flags: result.blocked ? ['respuesta_bloqueada'] : [],
@@ -103,9 +129,47 @@ export class ConversationService {
     } catch (err) {
       console.error(`[agent] ${err.message}`);
       const fallback = this.agent.fallback;
-      this.record({ userId, channel, role: 'assistant', content: fallback, latencyMs: Date.now() - started, error: err.message });
+      this.record({ userId, channel, role: 'assistant', content: fallback, latencyMs: this.now() - started, error: err.message });
       return [fallback];
     }
+  }
+
+  /**
+   * En modo humano, confirma al usuario que su mensaje llegó si el operador
+   * lleva rato sin escribir y no se acaba de enviar otro aviso.
+   */
+  maybeHoldReply(userId, channel, userText) {
+    if (!this.shouldSendHoldReply(userId)) return null;
+    const reply = looksEnglish(userText) ? HOLD_REPLY_EN : HOLD_REPLY_ES;
+    this.record({ userId, channel, role: 'assistant', content: reply });
+    this.store.addEvent(userId, 'aviso_espera', reply);
+    return reply;
+  }
+
+  shouldSendHoldReply(userId) {
+    const now = this.now();
+    const lastOperator = this.lastMessageAt(userId, 'operator');
+    if (lastOperator != null && now - lastOperator < this.holdOperatorIdleMs) return false;
+    const lastHold = this.lastHoldReplyAt(userId);
+    if (lastHold != null && now - lastHold < this.holdCooldownMs) return false;
+    return true;
+  }
+
+  lastMessageAt(userId, role) {
+    const row = this.store.db
+      .prepare('SELECT MAX(created_at) AS at FROM messages WHERE user_id = ? AND role = ?')
+      .get(userId, role);
+    return row?.at ? Date.parse(row.at) : null;
+  }
+
+  lastHoldReplyAt(userId) {
+    const row = this.store.db
+      .prepare(
+        `SELECT MAX(created_at) AS at FROM messages
+         WHERE user_id = ? AND role = 'assistant' AND content IN (?, ?)`,
+      )
+      .get(userId, HOLD_REPLY_ES, HOLD_REPLY_EN);
+    return row?.at ? Date.parse(row.at) : null;
   }
 
   handoverExpired(userId) {
@@ -117,7 +181,7 @@ export class ConversationService {
            UNION ALL SELECT created_at FROM events WHERE user_id = ? AND type IN ('handover', 'operador_toma'))`,
       )
       .get(userId, userId).at;
-    return !last || Date.now() - Date.parse(last) > this.handoverTimeoutMs;
+    return !last || this.now() - Date.parse(last) > this.handoverTimeoutMs;
   }
 
   /** Cambia entre IA y operador humano; `state` opcional actualiza el termómetro. */

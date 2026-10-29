@@ -77,13 +77,8 @@ az webapp config set -n "$APP" -g "$RG" --always-on true --http20-enabled true -
 
 DASHBOARD_USER="$(env_value DASHBOARD_USER)"
 DASHBOARD_USER="${DASHBOARD_USER:-admin}"
+# Sin DASHBOARD_PASSWORD en .env el panel queda público (así se usa en la demo de la hackathon).
 DASHBOARD_PASSWORD="$(env_value DASHBOARD_PASSWORD)"
-if [ -z "$DASHBOARD_PASSWORD" ]; then
-  DASHBOARD_PASSWORD="$(az webapp config appsettings list -n "$APP" -g "$RG" --query "[?name=='DASHBOARD_PASSWORD'].value | [0]" -o tsv)"
-fi
-if [ -z "$DASHBOARD_PASSWORD" ]; then
-  DASHBOARD_PASSWORD="$(openssl rand -base64 12 | tr -d '/+=')"
-fi
 
 echo "==> Configuración de la app"
 # /home es persistente en App Service (base SQLite). La sesión de WhatsApp va en disco
@@ -110,9 +105,16 @@ az webapp config appsettings set -n "$APP" -g "$RG" -o none --settings \
   PUBLIC_WHATSAPP_NUMBER="$(env_value PUBLIC_WHATSAPP_NUMBER)" \
   WHATSAPP_ENABLED=false
 
+if [ -z "$DASHBOARD_PASSWORD" ]; then
+  az webapp config appsettings delete -n "$APP" -g "$RG" --setting-names DASHBOARD_PASSWORD -o none
+fi
+
 az webapp restart -n "$APP" -g "$RG" -o none
 
 echo
 echo "Listo: https://$APP.azurewebsites.net"
-echo "Usuario del panel: $DASHBOARD_USER"
-echo "Contraseña del panel: guardada en la configuración de la app (DASHBOARD_PASSWORD)"
+if [ -n "$DASHBOARD_PASSWORD" ]; then
+  echo "Panel protegido: usuario $DASHBOARD_USER (contraseña en DASHBOARD_PASSWORD)"
+else
+  echo "Panel público: sin DASHBOARD_PASSWORD"
+fi

@@ -397,8 +397,8 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 
 | Nombre | Commits |
 | :--- | :---: |
-| kiramman-mp3 | 114 |
-| Dayle Garcia | 3 |
+| kiramman-mp3 | 122 |
+| Dayle Garcia | 7 |
 
 ---
 

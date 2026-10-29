@@ -15,7 +15,7 @@ const MAX_INPUT_CHARS = 1500;
 /** Detección ligera de inglés (sin LLM): palabras comunes y sin signos del español. */
 export function looksEnglish(text) {
   if (/[áéíóúüñ¿¡]/i.test(text)) return false;
-  return /\b(the|you|please|hello|hi|hey|thanks|thank|want|need|can|could|would|help|course|price|yes|no|ok|okay|waiting|anyone|there|hello)\b/i.test(
+  return /\b(the|you|please|hello|hi|hey|thanks|thank|want|need|can|could|would|help|course|price|yes|waiting|anyone|there)\b/i.test(
     text,
   );
 }
@@ -109,6 +109,7 @@ export class ConversationService {
         flags,
         summary: conversation.summary,
         profile: conversation.profile,
+        name: conversation.name,
       });
       this.record({
         userId,

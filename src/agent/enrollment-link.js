@@ -1,5 +1,3 @@
-import { spawnSync } from 'node:child_process';
-
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** @type {Map<string, { fields: ReturnType<typeof parseFormFields>, expires: number }>} */
 const cache = new Map();
@@ -128,27 +126,6 @@ export function parseFormFields(html) {
       options,
     });
   }
-  return fields;
-}
-
-function fetchHtmlSync(formUrl) {
-  const bin = process.platform === 'win32' ? 'curl.exe' : 'curl';
-  const result = spawnSync(bin, ['-sL', '-A', 'CTT-FISEI-Agente/1.0', '--max-time', '15', formUrl], {
-    encoding: 'utf8',
-    maxBuffer: 10 * 1024 * 1024,
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0 || !result.stdout) {
-    throw new Error('No se pudo descargar el formulario');
-  }
-  return result.stdout;
-}
-
-function loadFieldsSync(formUrl) {
-  const cached = getCached(formUrl);
-  if (cached) return cached;
-  const fields = parseFormFields(fetchHtmlSync(formUrl));
-  setFormFieldsCache(formUrl, fields);
   return fields;
 }
 
@@ -297,19 +274,6 @@ function applyPrefill(formUrl, fields, profile) {
 export async function buildPrefilledUrl(formUrl, profile = {}) {
   try {
     const fields = await getFormFields(formUrl);
-    return applyPrefill(formUrl, fields, profile);
-  } catch {
-    return formUrl;
-  }
-}
-
-/**
- * Variante síncrona para `ver_curso` (el agente aún no espera promesas de tools).
- * Usa la caché o descarga con curl; ante cualquier fallo, URL original.
- */
-export function buildPrefilledUrlSync(formUrl, profile = {}) {
-  try {
-    const fields = loadFieldsSync(formUrl);
     return applyPrefill(formUrl, fields, profile);
   } catch {
     return formUrl;

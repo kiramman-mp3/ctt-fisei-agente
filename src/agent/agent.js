@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { config } from '../config.js';
 import { buildSystemPrompt } from './prompt.js';
 import { TOOL_DEFINITIONS, TOOL_HANDLERS } from './tools.js';
+import { buildPrefilledUrl, profileHasPrefillData } from './enrollment-link.js';
 import {
   outputViolation,
   catalogPriceSet,
@@ -14,8 +15,8 @@ import {
 import { getCourses } from '../scraper/courses.js';
 
 const MAX_STEPS = 5;
-/** Alineado con el README: respuestas acotadas a 600 tokens. */
-export const MAX_COMPLETION_TOKENS = 600;
+/** Incluye el razonamiento de modelos como gpt-oss: con 600 las respuestas se cortaban. */
+export const MAX_COMPLETION_TOKENS = 1200;
 /** Tope duro de caracteres para historial + resumen + perfil antes del LLM. */
 export const CONTEXT_BUDGET_CHARS = 6000;
 
@@ -186,7 +187,7 @@ export class CourseAgent {
 
       messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
       for (const call of calls) {
-        const result = this.runTool(call, courses);
+        const result = await this.runTool(call, courses, input);
         if (call.function.name === 'transferir_a_asesor' && result.ok) handover = result.handover;
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
@@ -194,7 +195,7 @@ export class CourseAgent {
     throw new Error('Se superó el número máximo de pasos del agente');
   }
 
-  runTool(call, courses) {
+  async runTool(call, courses, input = {}) {
     const handler = TOOL_HANDLERS[call.function.name];
     if (!handler) return { error: `Herramienta desconocida: ${call.function.name}` };
     let args;
@@ -204,6 +205,17 @@ export class CourseAgent {
       return { error: 'Argumentos inválidos' };
     }
     const result = handler(args);
+    // Formulario prellenado con los datos de ESTA conversación (se pasan por parámetro, sin estado global).
+    if (call.function.name === 'ver_curso' && result.inscripcion?.includes('docs.google.com/forms')) {
+      const profile = { ...input.profile, nombre_completo: input.name || undefined, curso: result.nombre };
+      if (profileHasPrefillData(profile)) {
+        const prefilled = await buildPrefilledUrl(result.inscripcion, profile);
+        if (/[?&]entry\.\d+=/.test(prefilled)) {
+          result.inscripcion = prefilled;
+          result.nota_inscripcion = 'Formulario prellenado con los datos conocidos; pide a la persona que los revise antes de enviar.';
+        }
+      }
+    }
     if (call.function.name === 'ver_curso' && !result.error) courses.add(result.id);
     if (call.function.name === 'buscar_cursos' && result.length <= 3) result.forEach((c) => courses.add(c.id));
     return result;

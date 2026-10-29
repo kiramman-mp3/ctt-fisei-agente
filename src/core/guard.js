@@ -23,7 +23,8 @@ const INJECTION = [
   /olvida (todo|tus (reglas|instrucciones))/,
   /(system|sistema) ?prompt|prompt del sistema|tus instrucciones (internas|ocultas)/,
   /(actua|comportate|finge|haz de cuenta) (como|que eres)/,
-  /modo (desarrollador|developer|dios|admin)|jailbreak|\bdan\b/,
+  // "dan" es palabra común en español ("¿dan certificado?"): solo cuenta como rol de jailbreak.
+  /modo (desarrollador|developer|dios|admin|dan)|jailbreak|\bdan mode\b|(eres|actua como|act as) (ahora )?dan\b/,
   /(soy|habla con) (el )?(director|decano|administrador|admin|coordinador|rector)/,
   /nuevas? (reglas|instrucciones)|a partir de ahora (eres|debes)/,
   /<\/?(system|assistant|instrucciones)>|\[(system|inst)\]/,
@@ -37,7 +38,7 @@ const HIGH_INJECTION = [
   /ignore (all )?(your )?(previous )?(instructions|rules)/,
   /(system|sistema) ?prompt|prompt del sistema|tus instrucciones (internas|ocultas)/,
   /reveal (your |the )?(system )?prompt|dime (tu |el )?(system )?prompt|muestra(me)? (tu |el )?(system )?prompt/,
-  /modo (desarrollador|developer|dios|admin)|jailbreak|\bdan\b|you are now (dan|developer)/,
+  /modo (desarrollador|developer|dios|admin|dan)|jailbreak|\bdan mode\b|(eres|actua como|act as) (ahora )?dan\b|you are now (dan|developer)/,
   /<\/?(system|assistant|instrucciones)>|\[(system|inst)\]/,
   /(soy|habla con) (el )?(director|decano|administrador|admin|coordinador|rector).{0,80}(descuento|gratis|rebaja|cupon|90 ?%|100 ?%)/,
   /(as |en calidad de )?(director|decano|administrador).{0,60}(orden[oa]|autoriz[oa]|aplica|dame|otorga).{0,40}(descuento|gratis|rebaja)/,
@@ -171,7 +172,9 @@ export function outputViolation(answer, catalog = { amounts: new Set(), percenta
   if (!catalog.amounts.size && !catalog.percentages.size) return null;
 
   if (amounts.some((n) => !catalog.amounts.has(n))) return 'prices';
-  if (percentages.some((p) => !catalog.percentages.has(p))) return 'prices';
+  // Los porcentajes solo cuentan si acompañan a un descuento ("70% práctica" o "100% virtual" son válidos).
+  const discountPercentages = percentages.filter((p) => new RegExp(`${p} ?%[^.\\n]{0,30}(descuento|rebaja|off)`, 'i').test(answer));
+  if (discountPercentages.some((p) => !catalog.percentages.has(p))) return 'prices';
   return null;
 }
 

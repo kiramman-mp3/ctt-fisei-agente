@@ -43,7 +43,7 @@ export class ProspectAnalyzer {
         { role: 'user', content: transcript },
       ],
       temperature: 0,
-      max_tokens: 600,
+      max_tokens: 1000,
     };
     // Algunos proveedores rechazan el JSON estricto; en ese caso se pide texto y se extrae el objeto.
     try {

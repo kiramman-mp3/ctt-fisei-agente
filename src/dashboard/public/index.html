@@ -11,50 +11,50 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="plate">
-      <div class="plate-inner">
+    <header class="topbar">
+      <div class="topbar-inner">
         <a class="brand" href="https://ctt-talleresfisei.uta.edu.ec/" target="_blank" rel="noopener">
-          <img src="img/logo-ctt.png" alt="FISEI · CTT Talleres Tecnológicos" width="220" height="91" />
+          <img src="img/logo-ctt.png" alt="FISEI · CTT Talleres Tecnológicos" width="168" height="69" />
         </a>
-        <div class="channels" id="status" aria-label="Estado de los canales"></div>
-      </div>
-    </header>
-
-    <nav class="navbar" aria-label="Secciones">
-      <div class="navbar-inner">
-        <div class="tabs" role="tablist">
+        <nav class="tabs" role="tablist" aria-label="Secciones">
           <button role="tab" id="tab-inbox" aria-selected="true" aria-controls="view-inbox">
-            Bandeja en vivo <span id="attention" class="count" hidden></span>
+            Bandeja <span id="attention" class="count" hidden></span>
           </button>
           <button role="tab" id="tab-courses" aria-selected="false" aria-controls="view-courses">Cursos</button>
           <button role="tab" id="tab-metrics" aria-selected="false" aria-controls="view-metrics">Métricas</button>
+        </nav>
+        <div class="session">
           <span id="live" class="live" title="Conexión en tiempo real">conectando…</span>
-          <button type="button" id="mute-alerts" class="mute-btn" aria-pressed="false" title="Silenciar o activar el sonido de alertas">Sonido de alertas</button>
-          <span class="operator" id="operator"></span>
-          <button type="button" id="logout" class="mute-btn">Cerrar sesión</button>
-        </div>
-        <div class="filters" role="group" aria-label="Filtros">
-          <label>
-            Periodo
-            <select id="range">
-              <option value="24h">Últimas 24 h</option>
-              <option value="7d">Últimos 7 días</option>
-              <option value="30d" selected>Últimos 30 días</option>
-              <option value="90d">Últimos 90 días</option>
-              <option value="all">Todo</option>
-            </select>
-          </label>
-          <label>
-            Canal
-            <select id="channel">
-              <option value="">Todos</option>
-              <option value="telegram">Telegram</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
-          </label>
+          <button type="button" id="mute-alerts" class="ghost-btn" aria-pressed="false" title="Silenciar o activar el sonido de alertas">Sonido de alertas</button>
+          <span class="session-user" id="operator"></span>
+          <button type="button" id="logout" class="ghost-btn">Cerrar sesión</button>
         </div>
       </div>
-    </nav>
+    </header>
+
+    <div class="toolbar">
+      <div class="channels" id="status" aria-label="Estado de los canales"></div>
+      <div class="filters" role="group" aria-label="Filtros">
+        <label>
+          Periodo
+          <select id="range">
+            <option value="24h">Últimas 24 h</option>
+            <option value="7d">Últimos 7 días</option>
+            <option value="30d" selected>Últimos 30 días</option>
+            <option value="90d">Últimos 90 días</option>
+            <option value="all">Todo</option>
+          </select>
+        </label>
+        <label>
+          Canal
+          <select id="channel">
+            <option value="">Todos</option>
+            <option value="telegram">Telegram</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select>
+        </label>
+      </div>
+    </div>
 
     <section id="wa-link" class="wa-link" hidden aria-live="polite"></section>
 
@@ -97,31 +97,29 @@
             <header><h2>Distribución actual por estado</h2></header>
             <div class="chart svg-chart" id="chart-dist" role="img" aria-label="Distribución por estado con porcentajes"></div>
           </article>
-          <article class="card wide" id="card-latency" hidden>
-            <header><h2>Latencia media y tokens por día</h2><div class="legend" id="legend-latency"></div></header>
-            <div class="chart svg-chart" id="chart-latency" role="img" aria-label="Latencia y tokens diarios"></div>
+          <article class="card" id="card-latency" hidden>
+            <header><h2>Tiempo de respuesta por día</h2></header>
+            <div class="chart svg-chart" id="chart-latency" role="img" aria-label="Tiempo medio de respuesta por día"></div>
           </article>
-        </section>
-        <section class="grid">
+          <article class="card" id="card-tokens" hidden>
+            <header><h2>Tokens por día</h2></header>
+            <div class="chart svg-chart" id="chart-tokens" role="img" aria-label="Tokens consumidos por día"></div>
+          </article>
           <article class="card wide">
             <header><h2>Preguntas por día</h2><div class="legend" id="legend-day"></div></header>
             <div class="chart"><canvas id="chart-day" aria-label="Preguntas por día y canal"></canvas></div>
           </article>
           <article class="card">
-            <header><h2>Termómetro de prospectos</h2></header>
-            <div class="chart"><canvas id="chart-state" aria-label="Prospectos por estado"></canvas></div>
-          </article>
-          <article class="card">
             <header><h2>Temas consultados</h2></header>
-            <div class="chart"><canvas id="chart-topic" aria-label="Preguntas por tema"></canvas></div>
-          </article>
-          <article class="card">
-            <header><h2>Cursos más consultados</h2></header>
-            <div class="chart tall"><canvas id="chart-course" aria-label="Cursos más consultados"></canvas></div>
+            <div class="chart tall"><canvas id="chart-topic" aria-label="Preguntas por tema"></canvas></div>
           </article>
           <article class="card">
             <header><h2>Preguntas por hora del día</h2></header>
             <div class="chart tall"><canvas id="chart-hour" aria-label="Preguntas por hora"></canvas></div>
+          </article>
+          <article class="card wide">
+            <header><h2>Cursos más consultados</h2></header>
+            <div class="chart tall"><canvas id="chart-course" aria-label="Cursos más consultados"></canvas></div>
           </article>
         </section>
       </section>

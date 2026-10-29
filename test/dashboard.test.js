@@ -73,3 +73,28 @@ test('el operador de demostración inicia sesión y accede al panel', async () =
     store.close();
   }
 });
+
+test('el operador puede eliminar una conversación completa', async () => {
+  const { store, server, base } = startServer();
+  try {
+    const id = store.upsertUser({ channel: 'telegram', externalId: 5, name: 'Leo' });
+    store.addMessage({ userId: id, channel: 'telegram', role: 'user', content: 'hola' });
+    store.addEvent(id, 'handover', 'prueba');
+    const ok = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(DEMO_OPERATOR),
+    });
+    const cookie = ok.headers.get('set-cookie').split(';')[0];
+    const url = `${base}/api/conversations/${encodeURIComponent(id)}`;
+
+    assert.equal((await fetch(url, { method: 'DELETE' })).status, 401);
+    assert.equal((await fetch(url, { method: 'DELETE', headers: { cookie } })).status, 200);
+    assert.equal(store.getConversation(id), undefined);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM messages WHERE user_id = ?').get(id).n, 0);
+    assert.equal((await fetch(url, { method: 'DELETE', headers: { cookie } })).status, 404);
+  } finally {
+    server.close();
+    store.close();
+  }
+});

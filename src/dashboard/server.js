@@ -35,7 +35,7 @@ function cors(req, res, next) {
   res.set({
     'Access-Control-Allow-Origin': req.headers.origin ?? '*',
     'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     Vary: 'Origin',
   });
@@ -160,7 +160,12 @@ export function createDashboard({ store, service, telegramInfo, whatsapp = null,
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
     const send = (event) => (data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    const listeners = { message: send('message'), conversation: send('conversation'), status: send('status') };
+    const listeners = {
+      message: send('message'),
+      conversation: send('conversation'),
+      status: send('status'),
+      deleted: send('deleted'),
+    };
     for (const [event, fn] of Object.entries(listeners)) bus.on(event, fn);
     listeners.status(status());
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
@@ -236,6 +241,12 @@ export function createDashboard({ store, service, telegramInfo, whatsapp = null,
     const reason = mode === 'human' ? 'El operador tomó el control' : 'El operador devolvió la conversación a la IA';
     if (mode === 'human') store.addEvent(req.params.userId, 'operador_toma', reason);
     res.json(service.setMode(req.params.userId, mode, reason));
+  });
+
+  app.delete('/api/conversations/:userId', (req, res) => {
+    if (!store.deleteConversation(req.params.userId)) return res.status(404).json({ error: 'Conversación no encontrada' });
+    bus.emit('deleted', { id: req.params.userId });
+    res.json({ ok: true });
   });
 
   app.post('/api/conversations/:userId/read', (req, res) => {

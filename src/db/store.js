@@ -189,6 +189,21 @@ export class Store {
     return history;
   }
 
+  /** Borra la conversación completa (mensajes, eventos y contacto). Devuelve true si existía. */
+  deleteConversation(userId) {
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM messages WHERE user_id = ?').run(userId);
+      this.db.prepare('DELETE FROM events WHERE user_id = ?').run(userId);
+      const { changes } = this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+      this.db.exec('COMMIT');
+      return changes > 0;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   close() {
     this.db.close();
   }

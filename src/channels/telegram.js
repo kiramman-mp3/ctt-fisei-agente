@@ -19,6 +19,7 @@ function coursesKeyboard() {
 /** Conector de Telegram: traduce updates del bot a llamadas del ConversationService. */
 export function createTelegramBot({ token, service, transcriber = null }) {
   const bot = new Bot(token);
+  let stopped = false;
 
   const sendText = async (chatId, text) => {
     for (const part of splitMessage(text, MAX_LENGTH)) {
@@ -93,18 +94,43 @@ export function createTelegramBot({ token, service, transcriber = null }) {
   bot.catch((err) => console.error(`[telegram] ${err.error?.message ?? err.message}`));
 
   return {
+    /** Conecta con reintentos y mantiene el polling vivo ante errores de red o 409. */
     async start() {
-      await bot.api.setMyCommands([
-        { command: 'cursos', description: 'Ver cursos abiertos' },
-        { command: 'asesor', description: 'Hablar con una persona del CTT' },
-        { command: 'reiniciar', description: 'Empezar una conversación nueva' },
-        { command: 'ayuda', description: 'Cómo usar el asistente' },
-      ]);
-      const me = await bot.api.getMe();
-      bot.start({ drop_pending_updates: true }).catch((e) => console.error(`[telegram] ${e.message}`));
+      let me = null;
+      for (let attempt = 1; !me; attempt++) {
+        try {
+          me = await bot.api.getMe();
+        } catch (err) {
+          const wait = Math.min(60, 5 * attempt);
+          console.warn(`[telegram] No se pudo conectar (${err.message}); reintento en ${wait} s`);
+          await new Promise((r) => setTimeout(r, wait * 1000));
+        }
+      }
+      bot.api
+        .setMyCommands([
+          { command: 'cursos', description: 'Ver cursos abiertos' },
+          { command: 'asesor', description: 'Hablar con una persona del CTT' },
+          { command: 'reiniciar', description: 'Empezar una conversación nueva' },
+          { command: 'ayuda', description: 'Cómo usar el asistente' },
+        ])
+        .catch((err) => console.warn(`[telegram] setMyCommands: ${err.message}`));
+
+      // grammY detiene el polling ante un error (p. ej. 409 mientras el contenedor anterior
+      // de un despliegue sigue vivo): se vuelve a iniciar en vez de quedar sordo para siempre.
+      const poll = () =>
+        bot.start({ drop_pending_updates: true }).catch((err) => {
+          if (stopped) return;
+          const wait = err?.error_code === 409 ? 15 : 5;
+          console.warn(`[telegram] Polling detenido (${err.message}); se reanuda en ${wait} s`);
+          setTimeout(poll, wait * 1000);
+        });
+      poll();
       console.log(`[telegram] Bot activo: https://t.me/${me.username}`);
       return me;
     },
-    stop: () => bot.stop(),
+    stop: () => {
+      stopped = true;
+      return bot.stop();
+    },
   };
 }

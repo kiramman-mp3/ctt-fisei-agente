@@ -1,6 +1,6 @@
 import { config } from '../config.js';
-import { createLlmClient, complete, stripThinking } from './agent.js';
-import { STATES } from '../db/store.js';
+import { createLlmClient, complete, stripThinking, trimHistoryToBudget } from './agent.js';
+import { STATES, CONTEXT_MAX_CHARS } from '../db/store.js';
 
 const PROMPT = `Analizas chats entre un prospecto y el asistente de cursos del CTT-FISEI.
 Devuelve SOLO un JSON con esta forma:
@@ -13,6 +13,9 @@ Criterios del estado:
 - dudoso: duda por precio, tiempo, nivel o compara opciones.
 - frustrado: molestia, quejas, repite preguntas sin obtener respuesta o pide un humano con enojo.`;
 
+/** Presupuesto de transcripción para el clasificador (deja margen al prompt del sistema). */
+const ANALYZER_TRANSCRIPT_BUDGET = Math.min(5000, CONTEXT_MAX_CHARS);
+
 /** Clasifica el estado del prospecto (termómetro), su perfil y un resumen para el operador. */
 export class ProspectAnalyzer {
   constructor({ client = createLlmClient(), models = config.llm.analyzerModels } = {}) {
@@ -20,11 +23,20 @@ export class ProspectAnalyzer {
     this.models = models;
   }
 
-  async analyze({ history }) {
+  async analyze({ history, previous }) {
     if (!history.length) return null;
-    const transcript = history
-      .map((m) => `${m.role === 'user' ? 'Prospecto' : 'Asistente'}: ${m.content.slice(0, 600)}`)
-      .join('\n');
+    // Resumen y perfil previos siempre entran; el historial se recorta al presupuesto.
+    const contextBits = [];
+    if (previous?.summary) contextBits.push(`Resumen previo: ${previous.summary}`);
+    if (previous?.profile && Object.keys(previous.profile).length) {
+      contextBits.push(`Perfil conocido: ${JSON.stringify(previous.profile)}`);
+    }
+    const reserved = contextBits.join('\n').length;
+    const bounded = trimHistoryToBudget(history, Math.max(500, ANALYZER_TRANSCRIPT_BUDGET - reserved));
+    const transcript = [
+      ...contextBits,
+      ...bounded.map((m) => `${m.role === 'user' ? 'Prospecto' : 'Asistente'}: ${String(m.content).slice(0, 600)}`),
+    ].join('\n');
     const request = {
       messages: [
         { role: 'system', content: PROMPT },

@@ -22,6 +22,12 @@ export const config = {
     model: env.STT_MODEL || 'whisper-large-v3-turbo',
   },
   handoverTimeoutMin: env.HANDOVER_TIMEOUT_MIN ? Number(env.HANDOVER_TIMEOUT_MIN) : 15,
+  // Minutos sin mensaje del operador para enviar el aviso de espera al usuario (modo humano).
+  holdOperatorIdleMin: env.HOLD_OPERATOR_IDLE_MIN ? Number(env.HOLD_OPERATOR_IDLE_MIN) : 3,
+  // Minutos mínimos entre avisos de espera consecutivos.
+  holdCooldownMin: env.HOLD_COOLDOWN_MIN ? Number(env.HOLD_COOLDOWN_MIN) : 5,
+  // URL opcional a la que hacer ping cada 10 min (p. ej. para evitar que el host se duerma).
+  keepaliveUrl: env.KEEPALIVE_URL || '',
   telegram: {
     token: env.TELEGRAM_BOT_TOKEN ?? '',
   },

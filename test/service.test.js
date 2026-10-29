@@ -1,13 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/db/store.js';
-import { ConversationService, HANDOVER_REPLY } from '../src/core/conversation-service.js';
+import {
+  ConversationService,
+  HANDOVER_REPLY,
+  HOLD_REPLY_ES,
+  HOLD_REPLY_EN,
+  looksEnglish,
+} from '../src/core/conversation-service.js';
 import { inspectInput, checkOutput, RISK_REPLY } from '../src/core/guard.js';
 import { bus } from '../src/core/events.js';
 
 const user = { channel: 'telegram', externalId: 42, name: 'Ana' };
 
-function setup({ answer = 'Respuesta IA', handover = null, analysis = null } = {}) {
+function setup({
+  answer = 'Respuesta IA',
+  handover = null,
+  analysis = null,
+  handoverTimeoutMin = 15,
+  holdOperatorIdleMin = 3,
+  holdCooldownMin = 5,
+  now = () => Date.now(),
+} = {}) {
   const store = new Store(':memory:');
   const agent = {
     fallback: 'fallback',
@@ -18,7 +32,15 @@ function setup({ answer = 'Respuesta IA', handover = null, analysis = null } = {
     },
   };
   const analyzer = analysis && { analyze: async () => analysis };
-  const service = new ConversationService({ store, agent, analyzer, handoverTimeoutMin: 15 });
+  const service = new ConversationService({
+    store,
+    agent,
+    analyzer,
+    handoverTimeoutMin,
+    holdOperatorIdleMin,
+    holdCooldownMin,
+    now,
+  });
   const sent = [];
   service.registerChannel('telegram', async (to, text) => sent.push({ to, text }));
   return { store, agent, service, sent };
@@ -49,7 +71,7 @@ test('pedir un humano pausa la IA y el operador responde con la identidad del bo
   assert.equal(agent.calls, 0);
   assert.equal(store.getConversation('telegram:42').mode, 'human');
 
-  assert.deepEqual(await service.handleIncoming({ ...user, text: '¿sigues ahí?' }), []);
+  assert.deepEqual(await service.handleIncoming({ ...user, text: '¿sigues ahí?' }), [HOLD_REPLY_ES]);
   assert.equal(agent.calls, 0);
 
   await service.sendOperatorMessage('telegram:42', 'Hola Ana, soy Juan del CTT');
@@ -105,3 +127,87 @@ test('ante riesgo para la persona responde con contención y deriva con urgencia
   assert.equal(c.mode, 'human');
   assert.match(c.handover_reason, /URGENTE/);
 });
+
+test('en modo humano envía aviso de espera si el operador está inactivo', async () => {
+  const { service, store, agent } = setup({ handoverTimeoutMin: 0 });
+  await service.handleIncoming({ ...user, text: 'quiero hablar con un asesor' });
+  const replies = await service.handleIncoming({ ...user, text: '¿alguien me atiende?' });
+  assert.deepEqual(replies, [HOLD_REPLY_ES]);
+  assert.equal(agent.calls, 0);
+  const roles = store.db.prepare('SELECT role, content FROM messages ORDER BY id').all();
+  assert.equal(roles.at(-1).role, 'assistant');
+  assert.equal(roles.at(-1).content, HOLD_REPLY_ES);
+  const events = store.db.prepare("SELECT type FROM events WHERE type = 'aviso_espera'").all();
+  assert.equal(events.length, 1);
+});
+
+test('el aviso de espera respeta el cooldown y la actividad reciente del operador', async () => {
+  let now = Date.parse('2026-10-29T12:00:00.000Z');
+  const { service, store } = setup({
+    handoverTimeoutMin: 0,
+    holdOperatorIdleMin: 3,
+    holdCooldownMin: 5,
+    now: () => now,
+  });
+  await service.handleIncoming({ ...user, text: 'quiero hablar con un asesor' });
+  // Alinear timestamps del historial con el reloj inyectado.
+  store.db.prepare('UPDATE messages SET created_at = ?').run(new Date(now).toISOString());
+  store.db.prepare('UPDATE events SET created_at = ?').run(new Date(now).toISOString());
+  assert.deepEqual(await service.handleIncoming({ ...user, text: 'hola?' }), [HOLD_REPLY_ES]);
+
+  // Dentro del cooldown: no se repite.
+  now += 2 * 60_000;
+  assert.deepEqual(await service.handleIncoming({ ...user, text: '¿sigues ahí?' }), []);
+
+  // Pasado el cooldown pero el operador acaba de escribir: tampoco.
+  now += 4 * 60_000;
+  await service.sendOperatorMessage('telegram:42', 'Un momento por favor');
+  store.db
+    .prepare("UPDATE messages SET created_at = ? WHERE role = 'operator'")
+    .run(new Date(now).toISOString());
+  assert.deepEqual(await service.handleIncoming({ ...user, text: 'ok espero' }), []);
+
+  // Operador inactivo otra vez (>3 min) y cooldown cumplido: nuevo aviso.
+  now += 4 * 60_000;
+  store.db
+    .prepare("UPDATE messages SET created_at = ? WHERE role = 'operator'")
+    .run(new Date(now - 4 * 60_000).toISOString());
+  store.db
+    .prepare("UPDATE messages SET created_at = ? WHERE content = ?")
+    .run(new Date(now - 10 * 60_000).toISOString(), HOLD_REPLY_ES);
+  assert.deepEqual(await service.handleIncoming({ ...user, text: '¿ya?' }), [HOLD_REPLY_ES]);
+});
+
+test('el aviso de espera responde en inglés si el mensaje del usuario lo está', async () => {
+  const { service } = setup({ handoverTimeoutMin: 0 });
+  assert.equal(looksEnglish('hello, is anyone there?'), true);
+  assert.equal(looksEnglish('¿sigues ahí?'), false);
+  await service.handleIncoming({ ...user, text: 'I want to talk to a human please' });
+  // Forzar modo humano sin depender de flags en inglés.
+  service.setMode('telegram:42', 'human', 'Pedido de asesor');
+  const replies = await service.handleIncoming({ ...user, text: 'hello, is anyone there?' });
+  assert.deepEqual(replies, [HOLD_REPLY_EN]);
+});
+
+test('courseStatus distingue en curso y finalizado con Fecha del curso', async () => {
+  const { courseStatus, parseDateRange } = await import('../src/agent/tools.js');
+  const now = new Date('2026-10-29T17:00:00Z'); // mediodía en Guayaquil
+  const course = (fecha, insc) => ({
+    status: 'abierto',
+    details: { 'Fecha del curso': fecha, ...(insc ? { 'Fechas de inscripciones': insc } : {}) },
+  });
+  assert.equal(courseStatus(course('Del 16 de octubre de 2026 al 05 de diciembre de 2026'), now), 'en curso');
+  assert.equal(
+    courseStatus(
+      course('Del 14 de noviembre de 2026 al 05 de diciembre de 2026', 'Del 30 de octubre de 2026 al 13 de noviembre de 2026'),
+      now,
+    ),
+    'próxima',
+  );
+  assert.equal(courseStatus(course('Del 07 al 30 de junio de 2025'), now), 'finalizado');
+  assert.equal(courseStatus(course('Del 31-mayo al 05-julio-2025'), now), 'finalizado');
+  const range = parseDateRange('Del 07 al 30 de junio de 2025');
+  assert.equal(range.start.toISOString(), '2025-06-07T05:00:00.000Z');
+  assert.equal(range.end.toISOString(), '2025-07-01T04:59:00.000Z');
+});
+

@@ -223,7 +223,7 @@ npm run scrape
 npm start
 ```
 
-El panel queda en `http://localhost:3000` y el bot de Telegram empieza a responder. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
+El panel queda en `http://localhost:3000` y el bot de Telegram empieza a responder. La landing pública de contacto con QR está en `http://localhost:3000/contacto.html`. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
 
 ### Desarrollo
 

@@ -75,11 +75,6 @@ az webapp config container set -n "$APP" -g "$RG" \
 # Siempre encendida: el bot de Telegram usa long polling y WhatsApp mantiene un navegador abierto.
 az webapp config set -n "$APP" -g "$RG" --always-on true --http20-enabled true -o none
 
-DASHBOARD_USER="$(env_value DASHBOARD_USER)"
-DASHBOARD_USER="${DASHBOARD_USER:-admin}"
-# Sin DASHBOARD_PASSWORD en .env el panel queda público (así se usa en la demo de la hackathon).
-DASHBOARD_PASSWORD="$(env_value DASHBOARD_PASSWORD)"
-
 echo "==> Configuración de la app"
 # /home es persistente en App Service (base SQLite). La sesión de WhatsApp va en disco
 # local porque Chrome no puede guardar su perfil en el almacenamiento compartido.
@@ -99,22 +94,15 @@ az webapp config appsettings set -n "$APP" -g "$RG" -o none --settings \
   STT_BASE_URL="$(env_value STT_BASE_URL)" \
   STT_MODEL="$(env_value STT_MODEL)" \
   TELEGRAM_BOT_TOKEN="$(env_value TELEGRAM_BOT_TOKEN)" \
-  DASHBOARD_USER="$DASHBOARD_USER" \
-  DASHBOARD_PASSWORD="$DASHBOARD_PASSWORD" \
   HANDOVER_TIMEOUT_MIN="$(env_value HANDOVER_TIMEOUT_MIN)" \
   PUBLIC_WHATSAPP_NUMBER="$(env_value PUBLIC_WHATSAPP_NUMBER)" \
   WHATSAPP_ENABLED=false
 
-if [ -z "$DASHBOARD_PASSWORD" ]; then
-  az webapp config appsettings delete -n "$APP" -g "$RG" --setting-names DASHBOARD_PASSWORD -o none
-fi
+# El acceso al panel ahora vive en la base de datos (tabla operators); se limpian las variables antiguas.
+az webapp config appsettings delete -n "$APP" -g "$RG" --setting-names DASHBOARD_USER DASHBOARD_PASSWORD -o none
 
 az webapp restart -n "$APP" -g "$RG" -o none
 
 echo
 echo "Listo: https://$APP.azurewebsites.net"
-if [ -n "$DASHBOARD_PASSWORD" ]; then
-  echo "Panel protegido: usuario $DASHBOARD_USER (contraseña en DASHBOARD_PASSWORD)"
-else
-  echo "Panel público: sin DASHBOARD_PASSWORD"
-fi
+echo "Acceso al panel: usuario admin, contraseña CttFisei2026 (cámbiala con npm run operator)"

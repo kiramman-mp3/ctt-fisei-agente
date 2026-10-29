@@ -1,6 +1,5 @@
 import express from 'express';
 import QRCode from 'qrcode';
-import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as analytics from '../db/analytics.js';
 import { TOPIC_LABELS } from '../db/topics.js';
@@ -9,24 +8,26 @@ import { whatsappState } from '../channels/whatsapp.js';
 import { openCourses } from '../channels/common.js';
 import { registrationStatus, isOfferable } from '../agent/tools.js';
 import { bus } from '../core/events.js';
+import { OperatorAuth, SESSION_COOKIE, SESSION_DAYS } from '../auth/operators.js';
 
-const safeEqual = (a, b) => {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-};
+const readCookie = (req, name) =>
+  (req.headers.cookie ?? '')
+    .split(';')
+    .map((c) => c.trim().split('='))
+    .find(([k]) => k === name)?.[1] ?? null;
 
-/** Autenticación HTTP básica; se desactiva si no hay contraseña configurada. */
-function basicAuth({ user, password }) {
-  return (req, res, next) => {
-    if (!password || req.method === 'OPTIONS') return next();
-    const [scheme, encoded] = (req.headers.authorization ?? '').split(' ');
-    if (scheme === 'Basic' && encoded) {
-      const [u, ...p] = Buffer.from(encoded, 'base64').toString().split(':');
-      if (safeEqual(u, user) && safeEqual(p.join(':'), password)) return next();
-    }
-    res.set('WWW-Authenticate', 'Basic realm="Dashboard CTT-FISEI"').status(401).send('Autenticación requerida');
-  };
+const isHttps = (req) => req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+// Freno simple a la fuerza bruta: 10 intentos fallidos por IP cada 15 minutos.
+const failedLogins = new Map();
+function tooManyAttempts(ip) {
+  const entry = failedLogins.get(ip);
+  return entry && entry.count >= 10 && Date.now() - entry.since < 15 * 60_000;
+}
+function recordFailure(ip) {
+  const entry = failedLogins.get(ip);
+  if (!entry || Date.now() - entry.since > 15 * 60_000) failedLogins.set(ip, { count: 1, since: Date.now() });
+  else entry.count++;
 }
 
 // La API queda abierta a cualquier origen (requisito del jurado: sin restricciones de CORS).
@@ -51,7 +52,7 @@ function filters(req) {
   return { since, channel };
 }
 
-export function createDashboard({ store, service, auth, telegramInfo, whatsapp = null, publicWhatsAppNumber = '' }) {
+export function createDashboard({ store, service, telegramInfo, whatsapp = null, publicWhatsAppNumber = '' }) {
   const app = express();
   const db = store.db;
   app.disable('x-powered-by');
@@ -59,7 +60,7 @@ export function createDashboard({ store, service, auth, telegramInfo, whatsapp =
 
   // ---------- Rutas públicas (landing de contacto): no piden la contraseña del panel ----------
   const publicDir = fileURLToPath(new URL('./public', import.meta.url));
-  const PUBLIC_FILES = new Set(['/contacto.html', '/contacto.css', '/contacto.js']);
+  const PUBLIC_FILES = new Set(['/contacto.html', '/contacto.css', '/contacto.js', '/login.html', '/login.css', '/login.js']);
   const publicStatic = express.static(publicDir);
   app.use((req, res, next) => (PUBLIC_FILES.has(req.path) || req.path.startsWith('/img/') ? publicStatic(req, res, next) : next()));
 
@@ -95,9 +96,48 @@ export function createDashboard({ store, service, auth, telegramInfo, whatsapp =
     );
   });
 
-  // ---------- Panel del operador: requiere autenticación ----------
-  app.use(basicAuth(auth));
+  // ---------- Inicio de sesión de operadores (usuarios en la base de datos) ----------
+  const auth = new OperatorAuth(db);
+  auth.ensureDefaultOperator();
   app.use(express.json({ limit: '32kb' }));
+
+  app.post('/api/auth/login', (req, res) => {
+    const ip = req.ip ?? 'desconocida';
+    if (tooManyAttempts(ip)) return res.status(429).json({ error: 'Demasiados intentos. Espera 15 minutos.' });
+    const session = auth.login(req.body?.username, req.body?.password);
+    if (!session) {
+      recordFailure(ip);
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+    failedLogins.delete(ip);
+    res.cookie(SESSION_COOKIE, session.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isHttps(req),
+      maxAge: SESSION_DAYS * 86400_000,
+      path: '/',
+    });
+    res.json({ username: session.username });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    auth.logout(readCookie(req, SESSION_COOKIE));
+    res.clearCookie(SESSION_COOKIE, { path: '/' });
+    res.json({ ok: true });
+  });
+
+  // ---------- Panel del operador: requiere sesión ----------
+  app.use((req, res, next) => {
+    const operator = auth.session(readCookie(req, SESSION_COOKIE));
+    if (operator) {
+      req.operator = operator;
+      return next();
+    }
+    if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Inicia sesión para continuar' });
+    res.redirect('/login.html');
+  });
+
+  app.get('/api/auth/me', (req, res) => res.json({ username: req.operator.username }));
   app.use(express.static(publicDir));
 
   const status = () => {

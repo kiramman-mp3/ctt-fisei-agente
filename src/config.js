@@ -40,8 +40,6 @@ export const config = {
   },
   dashboard: {
     port: Number(env.PORT || env.DASHBOARD_PORT || 3000),
-    user: env.DASHBOARD_USER || 'admin',
-    password: env.DASHBOARD_PASSWORD ?? '',
   },
   dbPath: env.DB_PATH || 'data/agente.db',
   coursesRefreshHours: Number(env.COURSES_REFRESH_HOURS || 6),

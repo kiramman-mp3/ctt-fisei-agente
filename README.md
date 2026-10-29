@@ -15,7 +15,7 @@ Se construyó para el Reto Oficial Hackathon 2026 de la FISEI-UTA (*Ecosistema M
 > [!TIP]
 > **Entregables en vivo**
 > - Bot de Telegram: [t.me/CttFiseiAsistenteBot](https://t.me/CttFiseiAsistenteBot)
-> - Panel de mando: [ctt-fisei-asistente.azurewebsites.net](https://ctt-fisei-asistente.azurewebsites.net)
+> - Panel de mando (Azure): [ctt-fisei-asistente.azurewebsites.net](https://ctt-fisei-asistente.azurewebsites.net) · usuario `admin` · contraseña `CttFisei2026`
 > - Landing pública con QR de Telegram y WhatsApp: [ctt-fisei-asistente.azurewebsites.net/contacto.html](https://ctt-fisei-asistente.azurewebsites.net/contacto.html)
 >
 > En local, con datos de ejemplo: `npm install && npm run seed && npm start` y abre `http://localhost:3000`.
@@ -53,6 +53,8 @@ Para el personal de coordinación y ventas del CTT-FISEI, que necesita atender a
 | <sub>Bandeja en vivo: termómetro, modo IA/operador, resumen y respuesta del operador.</sub> | <sub>Métricas: leads, derivaciones, manipulaciones bloqueadas, temas y cursos.</sub> |
 | <img width="420" src="docs/capturas/cursos.png" alt="Pestaña Cursos"> | <img width="420" src="docs/capturas/contacto.png" alt="Landing pública de contacto"> |
 | <sub>Cursos: estado real de inscripción, fechas, precios y formulario.</sub> | <sub>Landing pública: QR de Telegram y WhatsApp y cursos vigentes.</sub> |
+| <img width="420" src="docs/capturas/login.png" alt="Ingreso de operadores"> | |
+| <sub>Ingreso de operadores con el acceso de demostración visible.</sub> | |
 
 Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas reales).
 
@@ -79,6 +81,7 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 - **Identidad del CTT**: el panel usa el logo, la tipografía y los colores del sitio oficial; la cabecera de cada conversación es un póster de curso, marino cuando atiende la IA y carmesí cuando atiende un operador.
 - **Landing pública de contacto**: `/contacto.html` muestra los QR de Telegram y WhatsApp (generados por el servidor con el bot y el número reales) y los cursos con inscripción vigente; no pide la contraseña del panel.
 - **Pestaña Cursos**: el panel muestra el catálogo como pósters con el estado real de inscripción (abierta, por abrir, vencida o cerrada), fechas, modalidad, precios y el formulario; se puede sincronizar con la web en un clic.
+- **Ingreso de operadores**: página de login con la identidad del CTT; los usuarios y sus contraseñas (hash scrypt) viven en la base de datos, con sesiones por cookie y freno a la fuerza bruta. El acceso de demostración se muestra en la propia página.
 - **Panel en tiempo real**: Server-Sent Events, sin recargar la página; API abierta a cualquier origen (CORS).
 - **Métricas**: personas atendidas, leads calientes, derivaciones, manipulaciones bloqueadas, latencia, tokens por respuesta, temas, cursos y horarios.
 - **Dos canales, un pipeline**: Telegram (grammY) y WhatsApp (whatsapp-web.js) usan el mismo servicio de conversación.
@@ -157,14 +160,17 @@ Los conectores de mensajería solo traducen eventos del canal; toda la lógica d
 │   │   ├── courses.js              # Descarga, caché y refresco periódico
 │   │   ├── run.js                  # npm run scrape
 │   │   └── certs/                  # Certificado intermedio que la web de la UTA no envía
+│   ├── auth/
+│   │   └── operators.js            # Operadores, hash de contraseñas y sesiones
 │   └── dashboard/
-│       ├── server.js               # API REST + SSE + CORS + auth básica opcional + API pública
-│       └── public/                 # Panel (index.html, app.js, styles.css), landing (contacto.*) e img/
+│       ├── server.js               # API REST + SSE + CORS + login + API pública
+│       └── public/                 # Panel (index.html, app.js, styles.css), login.*, landing (contacto.*) e img/
 ├── data/courses.json               # Snapshot del catálogo (respaldo si la web no responde)
 ├── test/                           # Pruebas node:test y fixtures HTML
 ├── docs/capturas/                  # Capturas del panel
 ├── scripts/
 │   ├── deploy-azure.sh             # Despliegue en Azure App Service
+│   ├── set-operator.js             # Crea operadores o cambia contraseñas (npm run operator)
 │   ├── eval-agent.js               # Batería de evaluación del agente (npm run eval)
 │   └── demo-check.js               # Chequeo previo a la demo (npm run demo:check)
 ├── Dockerfile                      # Imagen con Node 24 y Chromium
@@ -213,7 +219,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | Token de @BotFather |
 | `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL` | Transcripción de voz (opcional, por defecto Groq Whisper) |
 | `WHATSAPP_ENABLED`, `CHROME_PATH`, `WWEBJS_DATA_PATH` | Conectar WhatsApp al arrancar, ejecutable de Chrome y carpeta de la sesión |
-| `DASHBOARD_PORT`, `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Puerto y autenticación básica opcional del panel; sin `DASHBOARD_PASSWORD` el panel es público (así está la demo) |
+| `DASHBOARD_PORT` | Puerto del panel (en Azure se usa `PORT`) |
 | `PUBLIC_WHATSAPP_NUMBER` | Número que muestra la landing `/contacto.html` aunque WhatsApp esté desconectado (opcional) |
 | `HANDOVER_TIMEOUT_MIN` | Minutos sin respuesta del operador antes de que la IA retome (0 = nunca) |
 | `HOLD_OPERATOR_IDLE_MIN`, `HOLD_COOLDOWN_MIN` | Aviso de espera en modo operador: minutos de inactividad (3) y separación mínima entre avisos (5) |
@@ -240,7 +246,7 @@ npm run scrape
 npm start
 ```
 
-El panel queda en `http://localhost:3000` y el bot de Telegram empieza a responder. La landing pública de contacto con QR está en `http://localhost:3000/contacto.html`. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
+El panel queda en `http://localhost:3000` (te lleva al login; la primera vez se crea el operador `admin` / `CttFisei2026`) y el bot de Telegram empieza a responder. La landing pública de contacto con QR está en `http://localhost:3000/contacto.html`. Para WhatsApp pulsa **Iniciar sesión** en la tarjeta de WhatsApp del panel y escanea el QR desde WhatsApp > Dispositivos vinculados > Vincular un dispositivo. Con `WHATSAPP_ENABLED=true` (o con una sesión ya guardada) se conecta al arrancar.
 
 ### Desarrollo
 
@@ -256,6 +262,7 @@ Reinicia el proceso al guardar cambios. Para ver el panel con datos, ejecuta ant
 | `npm run dev` | Igual que `start`, con recarga automática |
 | `npm run scrape` | Descarga el catálogo y actualiza `data/courses.json` |
 | `npm run models` | Lista los modelos del proveedor configurado |
+| `npm run operator -- <usuario> <contraseña>` | Crea un operador o cambia su contraseña en la base de datos |
 | `npm run seed` | Crea 4 guiones `[demo]` + 60 conversaciones de ejemplo en la base configurada |
 | `npm run eval` | Batería de evaluación del agente (PASS/FAIL; sale ≠0 si falla) |
 | `npm run demo:check` | Chequeo previo a la demo: entorno, catálogo, health opcional y guiones |
@@ -290,13 +297,14 @@ npm run eval
 
 El bot usa *long polling*, así que el servicio debe estar siempre encendido; no sirve un entorno serverless que se duerme. Solo debe correr **una** instancia a la vez: dos procesos con el mismo token de Telegram se quitan los mensajes entre sí.
 
-**Azure App Service (despliegue actual)**: con Azure CLI y sesión iniciada (`az login`), y un `.env` con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN`:
+**Azure App Service (despliegue actual)**: https://ctt-fisei-asistente.azurewebsites.net (usuario `admin`, contraseña `CttFisei2026`). Para publicarlo, con Azure CLI y sesión iniciada (`az login`), y un `.env` con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN`:
+
 
 ```bash
 npm run deploy:azure
 ```
 
-`scripts/deploy-azure.sh` crea (o reutiliza) el grupo `rg-ctt-fisei-agente` en `eastus2`, un Azure Container Registry Basic, un plan Linux B2 (2 núcleos; con B1 la CPU llega al 99 % al vincular WhatsApp y el teléfono cancela) y la Web App `ctt-fisei-asistente`. La imagen se construye con Docker local y se sube al registro (Azure for Students no permite `az acr build`), la app queda *Always On* y los secretos de `.env` pasan a la configuración de la app. Si `.env` no trae `DASHBOARD_PASSWORD`, el panel queda público. Volver a ejecutarlo publica la versión actual del código.
+`scripts/deploy-azure.sh` crea (o reutiliza) el grupo `rg-ctt-fisei-agente` en `eastus2`, un Azure Container Registry Basic, un plan Linux B2 (2 núcleos; con B1 la CPU llega al 99 % al vincular WhatsApp y el teléfono cancela) y la Web App `ctt-fisei-asistente`. La imagen se construye con Docker local y se sube al registro (Azure for Students no permite `az acr build`), la app queda *Always On* y los secretos de `.env` pasan a la configuración de la app. Volver a ejecutarlo publica la versión actual del código.
 
 | Configuración en Azure | Por qué |
 | :--- | :--- |
@@ -305,7 +313,7 @@ npm run deploy:azure
 | `WEBSITES_PORT=3000` | Puerto del contenedor |
 | `PUBLIC_WHATSAPP_NUMBER` | Número que la landing muestra aunque WhatsApp esté desconectado |
 
-**Render**: crea un *Blueprint* apuntando a este repositorio. `render.yaml` define un servicio Docker con disco persistente en `/app/storage` (SQLite y sesión de WhatsApp) y health check en `/api/status`. Define en Render: `LLM_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DASHBOARD_PASSWORD` y, si usas voz, `STT_API_KEY`. La plataforma inyecta `PORT` y la aplicación lo respeta.
+**Render**: crea un *Blueprint* apuntando a este repositorio. `render.yaml` define un servicio Docker con disco persistente en `/app/storage` (SQLite y sesión de WhatsApp) y health check en `/api/status`. Define en Render: `LLM_API_KEY`, `TELEGRAM_BOT_TOKEN` y, si usas voz, `STT_API_KEY`. La plataforma inyecta `PORT` y la aplicación lo respeta.
 
 **Cualquier host con Docker**:
 
@@ -338,6 +346,9 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 
 | Método | Ruta | Descripción |
 | :--- | :--- | :--- |
+| `POST` | `/api/auth/login` | `{ username, password }`: abre sesión (cookie `ctt_session`, 7 días) |
+| `POST` | `/api/auth/logout` | Cierra la sesión |
+| `GET` | `/api/auth/me` | Operador de la sesión actual |
 | `GET` | `/api/events` | Stream SSE: `message`, `conversation`, `status` |
 | `GET` | `/api/inbox?range=&channel=` | Conversaciones con estado, modo, resumen y último mensaje |
 | `GET` | `/api/conversations/:userId` | Conversación y mensajes (con eventos de handover intercalados) |
@@ -354,7 +365,17 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 | `POST` | `/api/whatsapp/logout` | Desvincula el teléfono y borra la sesión |
 | `POST` | `/api/courses/refresh` | Fuerza el refresco del catálogo |
 
-Todas las rutas responden con CORS abierto. Si se define `DASHBOARD_PASSWORD`, piden autenticación básica, salvo `/contacto.html`, sus archivos, `/img/` y `/api/public/*`. En la demo no hay contraseña.
+Todas las rutas responden con CORS abierto. El panel y la API piden sesión de operador, salvo `/login.*`, `/contacto.*`, `/img/`, `/api/public/*` y `/api/auth/login`.
+
+### Acceso al panel
+
+| Dato | Valor |
+| :--- | :--- |
+| URL | https://ctt-fisei-asistente.azurewebsites.net |
+| Usuario | `admin` |
+| Contraseña | `CttFisei2026` |
+
+Los operadores se guardan en la tabla `operators` de SQLite con la contraseña en hash scrypt; el de demostración se crea solo si la tabla está vacía. Para cambiar la contraseña o crear otro operador: `npm run operator -- <usuario> <contraseña>`. Diez intentos fallidos desde la misma IP bloquean el ingreso por 15 minutos.
 
 ### Reglas de handover
 
@@ -417,6 +438,7 @@ El scraper lee `course.php` y cada `cursoN.php`. Las tarjetas comentadas en el H
 - [x] Landing pública con QR de Telegram y WhatsApp
 - [x] Formulario de inscripción prellenado
 - [x] Alertas sonoras, plantillas rápidas y gráficas de tendencia en el panel
+- [x] Login de operadores con usuarios en la base de datos
 - [ ] Varios operadores con asignación de conversaciones
 - [ ] Notificaciones push al operador cuando la IA se pausa
 

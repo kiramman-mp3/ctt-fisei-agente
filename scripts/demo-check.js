@@ -17,7 +17,6 @@ console.log('1. Variables de entorno críticas');
 const critical = [
   ['LLM_API_KEY', config.llm.apiKey, true],
   ['TELEGRAM_BOT_TOKEN', config.telegram.token, false],
-  ['DASHBOARD_PASSWORD', config.dashboard.password, false],
   ['DB_PATH', config.dbPath, true],
 ];
 for (const [name, value, required] of critical) {
@@ -60,26 +59,21 @@ if (!existsSync(cachePath)) {
   }
 }
 
-console.log('\n3. Health del panel (si BASE_URL está definida)');
+console.log('\n3. Health del servidor (si BASE_URL está definida)');
 const baseUrl = (process.env.BASE_URL || '').replace(/\/$/, '');
 if (!baseUrl) {
-  warn('BASE_URL no definida — se omite /api/status');
+  warn('BASE_URL no definida — se omite el health check');
 } else {
   try {
-    // El panel puede tener autenticación básica (DASHBOARD_PASSWORD), como en Azure.
-    const headers = config.dashboard.password
-      ? { Authorization: `Basic ${Buffer.from(`${config.dashboard.user}:${config.dashboard.password}`).toString('base64')}` }
-      : {};
-    const res = await fetch(`${baseUrl}/api/status`, { headers });
+    // Ruta pública: no necesita la sesión del panel.
+    const res = await fetch(`${baseUrl}/api/public/courses`);
     if (!res.ok) {
-      fail(`GET ${baseUrl}/api/status → HTTP ${res.status}`);
+      fail(`GET ${baseUrl}/api/public/courses → HTTP ${res.status}`);
       errors++;
     } else {
       const body = await res.json().catch(() => ({}));
-      ok(`GET ${baseUrl}/api/status → ${res.status}`);
-      if (body.telegram || body.whatsapp || body.ok !== undefined) {
-        ok(`estado: ${JSON.stringify(body).slice(0, 120)}`);
-      }
+      ok(`GET ${baseUrl}/api/public/courses → ${res.status}`);
+      if (Array.isArray(body)) ok(`${body.length} cursos ofertables publicados`);
     }
   } catch (err) {
     fail(`No se pudo contactar ${baseUrl}: ${err.message}`);

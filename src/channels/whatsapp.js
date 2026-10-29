@@ -40,6 +40,7 @@ function coursesMenu() {
 export function createWhatsAppClient({ service, chromePath, dataPath, transcriber = null }) {
   let client = null;
   let starting = null;
+  let restarting = false;
   const seen = new Set();
 
   const sendText = async (to, text) => {
@@ -84,9 +85,14 @@ export function createWhatsAppClient({ service, chromePath, dataPath, transcribe
 
     wa.on('authenticated', () => setState({ status: 'autenticado', qrDataUrl: null }));
     wa.on('auth_failure', (msg) => setState({ status: `error de autenticación: ${msg}` }));
+    let readyCount = 0;
     wa.on('ready', () => {
+      readyCount++;
       setState({ status: 'conectado', qrDataUrl: null, number: wa.info?.wid?.user ?? null });
       console.log(`[whatsapp] Conectado como ${whatsappState.number}`);
+      // Si WhatsApp Web se recarga solo, whatsapp-web.js deja de emitir mensajes:
+      // se reinicia el cliente (la sesión guardada evita volver a escanear el QR).
+      if (readyCount > 1 && wa === client) restart('WhatsApp Web se recargó');
     });
     wa.on('disconnected', (reason) => {
       setState({ status: 'desconectado', qrDataUrl: null, number: null });
@@ -97,9 +103,13 @@ export function createWhatsAppClient({ service, chromePath, dataPath, transcribe
       setTimeout(() => wa.destroy().catch(() => {}), 3000);
     });
 
-    wa.on('message', (msg) =>
-      handleMessage(wa, msg).catch((err) => console.error(`[whatsapp] Error con el mensaje de ${msg.from}:`, err?.stack ?? err)),
-    );
+    const onMessage = (msg) =>
+      handleMessage(wa, msg).catch((err) => console.error(`[whatsapp] Error con el mensaje de ${msg.from}:`, err?.stack ?? err));
+    wa.on('message', onMessage);
+    // Respaldo: algunas versiones de WhatsApp Web solo disparan message_create. `seen` evita duplicados.
+    wa.on('message_create', (msg) => {
+      if (!msg.fromMe) onMessage(msg);
+    });
   }
 
   /** Envía al chat del mensaje; si sendMessage falla, responde citando el mensaje. */
@@ -155,19 +165,46 @@ export function createWhatsAppClient({ service, chromePath, dataPath, transcribe
     for (const reply of replies) await sendTo(wa, msg, reply);
   }
 
+  /** Abre WhatsApp Web; si no hay sesión guardada se publica el QR en el panel. */
+  function start() {
+    if (client) return starting;
+    setState({ status: 'iniciando', qrDataUrl: null });
+    client = createClient();
+    starting = client.initialize().catch((err) => {
+      console.error(`[whatsapp] No se pudo iniciar: ${err.message}`);
+      setState({ status: 'error al iniciar', qrDataUrl: null });
+      client = null;
+    });
+    return starting;
+  }
+
+  /** Cierra el navegador y vuelve a abrir WhatsApp Web con la sesión guardada. */
+  async function restart(reason) {
+    if (restarting || !client) return;
+    restarting = true;
+    console.warn(`[whatsapp] Reiniciando el cliente: ${reason}`);
+    const old = client;
+    client = null;
+    try {
+      await old.destroy().catch(() => {});
+      await start();
+    } finally {
+      restarting = false;
+    }
+  }
+
+  // Vigilancia: si la sesión dejó de estar conectada sin avisar, se reinicia el cliente.
+  setInterval(async () => {
+    if (!client || restarting || whatsappState.status !== 'conectado') return;
+    const state = await Promise.race([
+      client.getState().catch(() => null),
+      new Promise((resolve) => setTimeout(() => resolve('SIN_RESPUESTA'), 15_000)),
+    ]);
+    if (state !== 'CONNECTED') restart(`estado ${state ?? 'desconocido'}`);
+  }, 60_000).unref();
+
   return {
-    /** Abre WhatsApp Web; si no hay sesión guardada se publica el QR en el panel. */
-    start() {
-      if (client) return starting;
-      setState({ status: 'iniciando', qrDataUrl: null });
-      client = createClient();
-      starting = client.initialize().catch((err) => {
-        console.error(`[whatsapp] No se pudo iniciar: ${err.message}`);
-        setState({ status: 'error al iniciar', qrDataUrl: null });
-        client = null;
-      });
-      return starting;
-    },
+    start,
     /** Desvincula el teléfono y borra la sesión guardada. */
     async logout() {
       if (!client) return;

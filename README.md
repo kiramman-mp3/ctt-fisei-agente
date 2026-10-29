@@ -13,12 +13,7 @@
 Se construyó para el Mini Hackathon *De la idea al prototipo* del [Grok Bot Ambato Meetup](https://luma.com/grokbotambatomeetup), realizado el 29 de octubre de 2026 en la Universidad Técnica de Ambato y organizado con la FISEI-UTA ([anuncio oficial](https://www.facebook.com/UniversidadTecnicadeAmbatoOficial/posts/-ambato-se-conecta-con-el-futurollega-el-grok-bot-ambato-meetup-un-encuentro-par/1448885784052688/)). Responde al Reto Oficial Hackathon 2026, *Ecosistema Multi-Agente para Ventas y Gestión Conversacional*: un agente que atiende y persuade por Telegram, más un panel donde un operador supervisa y toma el control en tiempo real. Los datos de los cursos salen de la oferta publicada en [ctt-talleresfisei.uta.edu.ec](https://ctt-talleresfisei.uta.edu.ec/course.php).
 
 > [!TIP]
-> **Entregables en vivo**
-> - Bot de Telegram: [t.me/CttFiseiAsistenteBot](https://t.me/CttFiseiAsistenteBot)
-> - Panel de mando (Azure): [ctt-fisei-asistente.azurewebsites.net](https://ctt-fisei-asistente.azurewebsites.net) · usuario `admin` · contraseña `CttFisei2026`
-> - Landing pública con QR de Telegram y WhatsApp: [ctt-fisei-asistente.azurewebsites.net/contacto.html](https://ctt-fisei-asistente.azurewebsites.net/contacto.html)
->
-> En local, con datos de ejemplo: `npm install && npm run seed && npm start` y abre `http://localhost:3000`.
+> En local, con datos de ejemplo: `npm install && npm run seed && npm start` y abre `http://localhost:3000` (usuario `admin`, contraseña `CttFisei2026`). La landing pública con los QR de Telegram y WhatsApp queda en `http://localhost:3000/contacto.html`.
 
 ---
 
@@ -299,7 +294,7 @@ npm run eval
 
 El bot usa *long polling*, así que el servicio debe estar siempre encendido; no sirve un entorno serverless que se duerme. Solo debe correr **una** instancia a la vez: dos procesos con el mismo token de Telegram se quitan los mensajes entre sí.
 
-**Azure App Service (despliegue actual)**: https://ctt-fisei-asistente.azurewebsites.net (usuario `admin`, contraseña `CttFisei2026`). Para publicarlo, con Azure CLI y sesión iniciada (`az login`), y un `.env` con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN`:
+**Azure App Service**: con Azure CLI y sesión iniciada (`az login`), y un `.env` con `LLM_API_KEY` y `TELEGRAM_BOT_TOKEN`:
 
 
 ```bash
@@ -383,7 +378,7 @@ Todas las rutas responden con CORS abierto. El panel y la API piden sesión de o
 
 | Dato | Valor |
 | :--- | :--- |
-| URL | https://ctt-fisei-asistente.azurewebsites.net |
+| URL | `http://localhost:3000` (o la URL del host donde se despliegue) |
 | Usuario | `admin` |
 | Contraseña | `CttFisei2026` |
 

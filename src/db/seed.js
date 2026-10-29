@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { Store } from './store.js';
 import { inspectInput } from '../core/guard.js';
+import { isOfferable, registrationStatus } from '../agent/tools.js';
 import { config } from '../config.js';
 
 const dbArg = process.argv.indexOf('--db');
@@ -29,8 +30,14 @@ const now = Date.now();
 
 /** Cuatro guiones fijos etiquetados [demo] para recorrer el panel en vivo (sin personas reales). */
 function seedDemoScripts() {
-  const course = open[0] ?? courses[0];
+  // Los guiones usan cursos con inscripción vigente para que los enlaces y datos coincidan.
+  const offerable = courses.filter((c) => isOfferable(registrationStatus(c)));
+  const course = offerable[0] ?? open[0] ?? courses[0];
   if (!course) return 0;
+  const arduino = offerable.find((c) => /arduino/i.test(c.name)) ?? course;
+  const github = offerable.find((c) => /github/i.test(c.name)) ?? course;
+  const link = (c) => c.registrationUrl ?? c.url;
+  const modality = (c) => (c.details?.['Modalidad'] ?? 'presencial').toLowerCase();
   let total = 0;
   let t = now - 2 * 3600_000;
   const at = () => new Date(t).toISOString();
@@ -38,7 +45,7 @@ function seedDemoScripts() {
     t += 45_000;
   };
 
-  const script = (externalId, name, channel, build) => {
+  const script = (externalId, name, channel, build, about = course) => {
     const userId = store.upsertUser({ channel, externalId, name }, at());
     const say = (role, content, extra = {}) => {
       store.addMessage({
@@ -54,7 +61,7 @@ function seedDemoScripts() {
       total++;
     };
     const ai = (content, extra = {}) =>
-      say('assistant', content, { courses: [course.id], latencyMs: 1100, tokensIn: 2000, tokensOut: 90, ...extra });
+      say('assistant', content, { courses: [about.id], latencyMs: 1100, tokensIn: 2000, tokensOut: 90, ...extra });
     build({ userId, say, ai });
   };
 
@@ -63,17 +70,17 @@ function seedDemoScripts() {
     say('user', 'Hola, ¿cuánto cuesta el curso de Arduino?');
     ai('Para estudiantes UTA son $40, para graduados y personal UTA $50 y para público en general $60. ¿En cuál grupo estás?');
     say('user', 'Está un poco caro para mí, soy estudiante UTA');
-    ai('Te entiendo. Por $40 tienes 32 horas presenciales y certificado digital con validación QR de la FISEI-UTA. ¿Te ayudo con la inscripción de estudiante?');
+    ai(`Te entiendo. Por $40 tienes ${arduino.hours} horas en modalidad ${modality(arduino)} y certificado digital con validación QR de la FISEI-UTA. ¿Te ayudo con la inscripción de estudiante?`);
     say('user', 'Dale, me interesa, ¿cómo me inscribo?');
-    ai(`¡Genial! Puedes inscribirte aquí: ${course.registrationUrl ?? course.url}. ¿Te queda alguna duda del pago?`);
+    ai(`¡Genial! Puedes inscribirte aquí: ${link(arduino)}. ¿Te queda alguna duda del pago?`);
     store.updateConversation(userId, {
       state: 'lead_caliente',
-      summary: `[demo] Objeción de precio resuelta en ${course.name}; aceptó tarifa de estudiante UTA.`,
-      profile: { tipo: 'estudiante_uta', curso_interes: course.name, demo: 'precio' },
+      summary: `[demo] Objeción de precio resuelta en ${arduino.name}; aceptó tarifa de estudiante UTA.`,
+      profile: { tipo: 'estudiante_uta', curso_interes: arduino.name, demo: 'precio' },
       unread: 0,
     });
     store.addEvent(userId, 'lead_caliente', 'Demo: objeción de precio resuelta', at());
-  });
+  }, arduino);
 
   // 2) Inyección bloqueada
   script('demo-inyeccion', 'Demo Inyección', 'whatsapp', ({ userId, say, ai }) => {
@@ -113,23 +120,23 @@ function seedDemoScripts() {
 
   // 4) Lead caliente con contacto
   script('demo-lead', 'Demo Lead', 'whatsapp', ({ userId, say, ai }) => {
-    say('user', 'Buenas, busco certificación en redes');
-    ai('Tenemos Introducción a las Redes – preparación CCNA. ¿Eres estudiante UTA, graduado/personal o público general?');
+    say('user', 'Buenas, busco una certificación para programar con IA');
+    ai(`Tenemos ${github.name}, ${github.hours} horas. ¿Eres estudiante UTA, graduado/personal o público general?`);
     say('user', 'Público general. Listo, quiero inscribirme');
-    ai(`¡Perfecto! Inscríbete aquí: ${course.registrationUrl ?? course.url}. El valor para público general es $60. ¿Te ayudo con algo más?`);
+    ai(`¡Perfecto! Inscríbete aquí: ${link(github)}. El valor para público general es $60. ¿Te ayudo con algo más?`);
     store.updateConversation(userId, {
       state: 'lead_caliente',
-      summary: `[demo] Lead caliente con contacto: listo para inscribirse en ${course.name}; ya recibió el enlace.`,
+      summary: `[demo] Lead caliente con contacto: listo para inscribirse en ${github.name}; ya recibió el enlace.`,
       profile: {
         tipo: 'publico',
-        curso_interes: course.name,
-        contacto: 'demo.lead@ejemplo.ec',
+        curso_interes: github.name,
+        contacto: 'demo.lead@example.com',
         demo: 'lead',
       },
       unread: 0,
     });
     store.addEvent(userId, 'lead_caliente', 'Demo: lead caliente con contacto', at());
-  });
+  }, github);
 
   return total;
 }

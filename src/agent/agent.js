@@ -2,9 +2,23 @@ import OpenAI from 'openai';
 import { config } from '../config.js';
 import { buildSystemPrompt } from './prompt.js';
 import { TOOL_DEFINITIONS, TOOL_HANDLERS } from './tools.js';
-import { checkOutput, securityNote, SAFE_REPLY } from '../core/guard.js';
+import {
+  outputViolation,
+  catalogPriceSet,
+  securityNote,
+  SAFE_REPLY,
+  CONTAINMENT_REPLY,
+  SANITIZED_INJECTION_USER,
+  PRICE_CORRECTION_NOTE,
+} from '../core/guard.js';
+import { getCourses } from '../scraper/courses.js';
 
 const MAX_STEPS = 5;
+/** Alineado con el README: respuestas acotadas a 600 tokens. */
+export const MAX_COMPLETION_TOKENS = 600;
+/** Tope duro de caracteres para historial + resumen + perfil antes del LLM. */
+export const CONTEXT_BUDGET_CHARS = 6000;
+
 const FALLBACK =
   'Uy, se me complicó responder en este momento 🙏. Escríbenos a talleresfisei@uta.edu.ec o ctt.fisei@uta.edu.ec y te ayudamos enseguida.';
 
@@ -68,6 +82,24 @@ export async function complete(client, models, request, reasoningEffort = config
 }
 
 /**
+ * Recorta el historial al presupuesto restante. El resumen y el perfil ya están
+ * reservados fuera de este recorte y siempre se inyectan.
+ */
+export function trimHistoryToBudget(history, budgetChars) {
+  if (budgetChars <= 0) return [];
+  const trimmed = [];
+  let used = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const row = history[i];
+    const len = String(row.content ?? '').length;
+    if (used + len > budgetChars && trimmed.length) break;
+    used += len;
+    trimmed.unshift(row);
+  }
+  return trimmed;
+}
+
+/**
  * Pipeline de inferencia: arma el contexto (prompt + resumen + historial
  * acotado), ejecuta el ciclo de herramientas y valida la respuesta.
  * No persiste nada: eso lo hace ConversationService.
@@ -83,29 +115,45 @@ export class CourseAgent {
     const context = [];
     if (summary) context.push(`Resumen de lo conversado antes: ${summary}`);
     if (profile && Object.keys(profile).length) context.push(`Perfil conocido del prospecto: ${JSON.stringify(profile)}`);
+    const contextBlock = context.join('\n');
+
+    const userPayload = flags.includes('inyeccion_alta')
+      ? SANITIZED_INJECTION_USER + securityNote(flags)
+      : text + securityNote(flags);
+
+    const reserved = contextBlock.length + userPayload.length;
+    const historyBudget = Math.max(0, CONTEXT_BUDGET_CHARS - reserved);
+    const boundedHistory = trimHistoryToBudget(history, historyBudget);
+
     return [
       { role: 'system', content: buildSystemPrompt(channel) },
-      ...(context.length ? [{ role: 'system', content: context.join('\n') }] : []),
+      ...(context.length ? [{ role: 'system', content: contextBlock }] : []),
       // Los mensajes del operador salen con la identidad del bot, así que el modelo los ve como propios.
-      ...history.map(({ role, content }) => ({ role: role === 'user' ? 'user' : 'assistant', content })),
-      { role: 'user', content: text + securityNote(flags) },
+      ...boundedHistory.map(({ role, content }) => ({ role: role === 'user' ? 'user' : 'assistant', content })),
+      { role: 'user', content: userPayload },
     ];
   }
 
   async respond(input) {
+    // Inyección de severidad alta: contención sin exponer el texto crudo al modelo.
+    if (input.flags?.includes('inyeccion_alta')) {
+      return { answer: CONTAINMENT_REPLY, courses: [], usage: { in: 0, out: 0 }, handover: null, blocked: true };
+    }
+
     const messages = this.buildMessages(input);
     const courses = new Set();
     const usage = { in: 0, out: 0 };
     let handover = null;
     let models = this.models;
     let regenerated = false;
+    let priceRegenerated = false;
 
     for (let step = 0; step < MAX_STEPS; step++) {
       const completion = await complete(this.client, models, {
         messages,
         tools: TOOL_DEFINITIONS,
         temperature: 0.5,
-        max_tokens: 1200,
+        max_tokens: MAX_COMPLETION_TOKENS,
       });
       usage.in += completion.usage?.prompt_tokens ?? 0;
       usage.out += completion.usage?.completion_tokens ?? 0;
@@ -124,7 +172,15 @@ export class CourseAgent {
         }
         const answer = cleaned.text;
         if (!answer) throw new Error('Respuesta vacía del modelo');
-        if (!checkOutput(answer)) return { answer: SAFE_REPLY, courses: [...courses], usage, handover, blocked: true };
+        const violation = outputViolation(answer, catalogPriceSet(getCourses()));
+        if (violation === 'prices' && !priceRegenerated) {
+          priceRegenerated = true;
+          messages.push({ role: 'assistant', content: message.content ?? answer });
+          messages.push({ role: 'user', content: PRICE_CORRECTION_NOTE });
+          step--;
+          continue;
+        }
+        if (violation) return { answer: SAFE_REPLY, courses: [...courses], usage, handover, blocked: true };
         return { answer, courses: [...courses], usage, handover };
       }
 

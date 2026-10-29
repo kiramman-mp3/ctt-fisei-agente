@@ -55,6 +55,9 @@ const MIGRATIONS = [
 
 export const STATES = ['nuevo', 'interesado', 'dudoso', 'frustrado', 'lead_caliente'];
 
+/** Tope duro de caracteres del historial enviado al LLM (alineado con el agente). */
+export const CONTEXT_MAX_CHARS = 6000;
+
 const parseConversation = (row) =>
   row && { ...row, profile: JSON.parse(row.profile || '{}') };
 
@@ -152,9 +155,10 @@ export class Store {
 
   /**
    * Últimos mensajes de la sesión actual en orden cronológico, recortados a un
-   * presupuesto de caracteres para controlar la ventana de contexto.
+   * presupuesto duro de caracteres (~tokens estimados × 4) para la ventana de contexto.
+   * El resumen y el perfil viven en `users` y el agente los inyecta aparte.
    */
-  getHistory(userId, { limit = 10, maxChars = 6000 } = {}) {
+  getHistory(userId, { limit = 10, maxChars = CONTEXT_MAX_CHARS } = {}) {
     const rows = this.db
       .prepare(
         `SELECT role, content FROM messages m JOIN users u ON u.id = m.user_id
@@ -165,8 +169,9 @@ export class Store {
     const history = [];
     let used = 0;
     for (const row of rows) {
-      used += row.content.length;
-      if (used > maxChars && history.length) break;
+      const len = String(row.content ?? '').length;
+      if (used + len > maxChars && history.length) break;
+      used += len;
       history.unshift(row);
     }
     return history;

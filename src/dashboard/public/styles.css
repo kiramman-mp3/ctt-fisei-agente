@@ -179,6 +179,16 @@ textarea {
   cursor: pointer;
 }
 
+/* ---------- Operador con sesión ---------- */
+.operator {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.operator:empty {
+  display: none;
+}
+
 /* ---------- Navegación ---------- */
 .navbar {
   border-bottom: 1px solid var(--line);

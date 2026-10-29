@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ingreso · Panel CTT-FISEI</title>
+    <link rel="icon" href="img/logo-ctt.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="login.css" />
+  </head>
+  <body>
+    <header class="plate">
+      <a class="brand" href="https://ctt-talleresfisei.uta.edu.ec/" target="_blank" rel="noopener">
+        <img src="img/logo-ctt.png" alt="FISEI · CTT Talleres Tecnológicos" width="220" height="91" />
+      </a>
+    </header>
+
+    <main class="stage">
+      <section class="poster" aria-labelledby="titulo">
+        <p class="pills"><span class="pill">Panel de mando</span><span class="pill">Asistente de cursos</span></p>
+        <h1 id="titulo">Ingreso de operadores</h1>
+        <p class="lead">Supervisa las conversaciones de Telegram y WhatsApp, toma el control cuando haga falta y revisa las métricas del asistente.</p>
+      </section>
+
+      <section class="card" aria-label="Formulario de ingreso">
+        <form id="login-form" novalidate>
+          <label for="username">Usuario</label>
+          <input id="username" name="username" autocomplete="username" required autofocus />
+
+          <label for="password">Contraseña</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+          <p id="error" class="error" role="alert" hidden></p>
+          <button type="submit" id="submit">Ingresar al panel</button>
+        </form>
+
+        <aside class="demo" aria-label="Acceso de demostración">
+          <p class="demo-title">Acceso de demostración (hackathon FISEI 2026)</p>
+          <p>Usuario: <code>admin</code></p>
+          <p>Contraseña: <code>CttFisei2026</code></p>
+          <button type="button" id="fill-demo" class="link-btn">Usar estos datos</button>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p>Centro de Transferencia y Desarrollo de Tecnologías · FISEI · Universidad Técnica de Ambato</p>
+      <p><a href="contacto.html">¿Buscas información de cursos? Escríbele al asistente</a></p>
+    </footer>
+
+    <script src="login.js"></script>
+  </body>
+</html>

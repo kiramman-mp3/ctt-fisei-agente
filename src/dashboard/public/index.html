@@ -29,6 +29,7 @@
           <button role="tab" id="tab-courses" aria-selected="false" aria-controls="view-courses">Cursos</button>
           <button role="tab" id="tab-metrics" aria-selected="false" aria-controls="view-metrics">Métricas</button>
           <span id="live" class="live" title="Conexión en tiempo real">conectando…</span>
+          <button type="button" id="mute-alerts" class="mute-btn" aria-pressed="false" title="Silenciar o activar el sonido de alertas">Sonido de alertas</button>
         </div>
         <div class="filters" role="group" aria-label="Filtros">
           <label>
@@ -81,6 +82,24 @@
 
       <section id="view-metrics" role="tabpanel" aria-labelledby="tab-metrics" hidden>
         <section class="kpis" id="kpis" aria-label="Indicadores"></section>
+        <section class="grid" aria-label="Gráficas de seguimiento">
+          <article class="card wide">
+            <header><h2>Conversaciones nuevas y leads calientes</h2><div class="legend" id="legend-ts-lines"></div></header>
+            <div class="chart svg-chart" id="chart-ts-lines" role="img" aria-label="Líneas de conversaciones y leads en 14 días"></div>
+          </article>
+          <article class="card">
+            <header><h2>Embudo de prospectos</h2></header>
+            <div class="chart svg-chart" id="chart-funnel" role="img" aria-label="Embudo interesado, dudoso y lead caliente"></div>
+          </article>
+          <article class="card">
+            <header><h2>Distribución actual por estado</h2></header>
+            <div class="chart svg-chart" id="chart-dist" role="img" aria-label="Distribución por estado con porcentajes"></div>
+          </article>
+          <article class="card wide" id="card-latency" hidden>
+            <header><h2>Latencia media y tokens por día</h2><div class="legend" id="legend-latency"></div></header>
+            <div class="chart svg-chart" id="chart-latency" role="img" aria-label="Latencia y tokens diarios"></div>
+          </article>
+        </section>
         <section class="grid">
           <article class="card wide">
             <header><h2>Preguntas por día</h2><div class="legend" id="legend-day"></div></header>

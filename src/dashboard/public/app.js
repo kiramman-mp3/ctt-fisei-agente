@@ -27,11 +27,21 @@
     respuesta_bloqueada: 'respuesta bloqueada',
     riesgo: 'POSIBLE RIESGO',
   };
+  const QUICK_TEMPLATES = [
+    { label: 'Saludo', text: 'Hola, soy un asesor del CTT-FISEI. ¿En qué puedo ayudarte hoy?' },
+    { label: 'Inscripción', text: 'Con gusto te ayudo con la inscripción. ¿Para qué curso te interesa registrarte y eres estudiante UTA, graduado/docente/administrativo o público general?' },
+    { label: 'Horarios', text: 'Te comparto la información de horarios del curso. ¿Cuál es el taller que te interesa para confirmarte días y horas exactas?' },
+    { label: 'Paciencia', text: 'Gracias por tu paciencia. Ya estoy revisando tu caso y te confirmo la información en unos momentos.' },
+  ];
+  const MUTE_KEY = 'panel-mute-alerts';
 
   let inbox = [];
   let selected = null;
   let stateFilter = 'todas';
   let activeTab = 'inbox';
+  let pendingAlertId = null;
+  let titleFlashTimer = null;
+  let titleFlashOn = false;
 
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const fmt = (n) => new Intl.NumberFormat('es-EC').format(n ?? 0);
@@ -83,8 +93,117 @@
     return el('span', { class: 'state', style: `--state-color: var(${s.color})` }, `${s.icon} ${s.label}`);
   };
   const modeChip = (mode) => el('span', { class: `mode ${mode}` }, mode === 'human' ? 'Operador' : 'IA');
-  const displayName = (c) => c.name || c.external_id.replace('@c.us', '');
-  const needsAttention = (c) => c.mode === 'human' || c.state === 'frustrado' || c.state === 'lead_caliente';
+  const displayName = (c) => c.name || String(c.external_id || c.id || c.user_id || '').replace('@c.us', '') || 'Sin nombre';
+  const needsAttention = (c) =>
+    c.mode === 'human' || c.state === 'frustrado' || c.state === 'lead_caliente' || /riesgo|frustr|humano|persona|URGENTE/i.test(c.handover_reason || '');
+  const isOperatorTakeover = (reason) => /operador tomó|Intervención del operador|devolvió la conversación/i.test(reason || '');
+
+  // ---------- Alertas de handover ----------
+
+  function alertsMuted() {
+    return localStorage.getItem(MUTE_KEY) === '1';
+  }
+
+  function syncMuteButton() {
+    const btn = $('mute-alerts');
+    if (!btn) return;
+    const muted = alertsMuted();
+    btn.setAttribute('aria-pressed', String(muted));
+    btn.textContent = muted ? 'Alertas silenciadas' : 'Sonido de alertas';
+    btn.classList.toggle('muted', muted);
+  }
+
+  function playAlertSound() {
+    if (alertsMuted()) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+      osc.onended = () => ctx.close().catch(() => {});
+    } catch {
+      /* WebAudio no disponible */
+    }
+  }
+
+  function stopTitleFlash() {
+    if (titleFlashTimer) clearInterval(titleFlashTimer);
+    titleFlashTimer = null;
+    titleFlashOn = false;
+  }
+
+  function startTitleFlash(count) {
+    stopTitleFlash();
+    const flash = () => {
+      document.title = titleFlashOn ? `(${count}) Requiere asesor` : 'Panel CTT-FISEI';
+      titleFlashOn = !titleFlashOn;
+    };
+    flash();
+    titleFlashTimer = setInterval(flash, 900);
+  }
+
+  function clearPendingAlert(userId) {
+    if (pendingAlertId && pendingAlertId === userId) {
+      pendingAlertId = null;
+      stopTitleFlash();
+    }
+  }
+
+  function showToast(title, detail, userId) {
+    let host = $('toasts');
+    if (!host) {
+      host = el('div', { id: 'toasts', class: 'toasts', 'aria-live': 'assertive' });
+      document.body.append(host);
+    }
+    const toast = el(
+      'div',
+      { class: 'toast', role: 'status' },
+      el('strong', {}, title),
+      el('p', {}, detail),
+      el(
+        'button',
+        {
+          type: 'button',
+          class: 'toast-open',
+          onclick: () => {
+            toast.remove();
+            showTab('inbox');
+            openConversation(userId).catch(console.error);
+          },
+        },
+        'Abrir chat',
+      ),
+    );
+    host.append(toast);
+    setTimeout(() => toast.remove(), 6000);
+  }
+
+  function alertRequiresAttention(c, prev) {
+    if (!c || c.mode !== 'human') return false;
+    const reason = c.handover_reason || '';
+    if (isOperatorTakeover(reason)) return false;
+    const becameHuman = !prev || prev.mode !== 'human';
+    const urgent = c.state === 'frustrado' || /riesgo|frustr|humano|persona|URGENTE|Asesor|Docente/i.test(reason);
+    const becameUrgent = urgent && (!prev || prev.state !== c.state || prev.handover_reason !== reason);
+    return becameHuman || becameUrgent;
+  }
+
+  function notifyHandover(c) {
+    const name = displayName(c);
+    const reason = c.handover_reason || (c.state === 'frustrado' ? 'Frustración detectada' : 'Requiere intervención');
+    showToast('Requiere asesor', `${name}: ${reason}`, c.id || c.user_id);
+    playAlertSound();
+    pendingAlertId = c.id || c.user_id;
+    startTitleFlash(1);
+  }
 
   // ---------- Bandeja ----------
 
@@ -121,10 +240,10 @@
 
   function renderInbox(flashId) {
     const list = filteredInbox();
-    const attention = inbox.filter((c) => c.mode === 'human' || c.state === 'frustrado').length;
+    const attention = inbox.filter((c) => c.mode === 'human' || c.state === 'frustrado' || /riesgo/i.test(c.handover_reason || '')).length;
     $('attention').hidden = !attention;
     $('attention').textContent = attention;
-    document.title = attention ? `(${attention}) Panel CTT-FISEI` : 'Panel CTT-FISEI';
+    if (!pendingAlertId) document.title = attention ? `(${attention}) Panel CTT-FISEI` : 'Panel CTT-FISEI';
 
     if (!list.length) {
       $('conversation-list').replaceChildren(el('li', { class: 'muted' }, 'No hay conversaciones con este filtro.'));
@@ -207,15 +326,21 @@
         ),
         take,
       ),
-      c.mode === 'human' && c.handover_reason ? el('p', { class: 'handover' }, `IA en pausa: ${c.handover_reason}`) : null,
+      c.handover_reason
+        ? el('p', { class: 'handover highlight' }, el('strong', {}, 'Motivo de pausa: '), c.handover_reason)
+        : null,
       el('p', { class: 'summary' }, el('strong', {}, 'Resumen: '), c.summary || 'Aún no hay suficiente conversación para resumir.'),
     );
   }
 
-  async function openConversation(userId) {
-    selected = userId;
-    const { conversation, messages } = await api(`/api/conversations/${encodeURIComponent(userId)}`);
-    const list = el('div', { class: 'messages', id: 'messages' }, messages.map(messageNode));
+  function applyTemplate(text) {
+    const input = $('composer-input');
+    if (!input) return;
+    input.value = text;
+    input.focus();
+  }
+
+  function renderComposer() {
     const input = el('textarea', {
       id: 'composer-input',
       rows: 2,
@@ -228,12 +353,25 @@
         }
       },
     });
-    $('chat').replaceChildren(
-      renderChatHead(conversation),
-      list,
+    return [
+      el(
+        'div',
+        { class: 'quick-templates', role: 'group', 'aria-label': 'Plantillas rápidas' },
+        ...QUICK_TEMPLATES.map((t) =>
+          el('button', { type: 'button', class: 'template-chip', onclick: () => applyTemplate(t.text) }, t.label),
+        ),
+      ),
       el('form', { class: 'composer', onsubmit: (e) => (e.preventDefault(), sendMessage()) }, input, el('button', { type: 'submit' }, 'Enviar')),
       el('p', { class: 'composer-hint' }, 'Al enviar, la IA se pausa y tu mensaje llega por el mismo bot.'),
-    );
+    ];
+  }
+
+  async function openConversation(userId) {
+    selected = userId;
+    clearPendingAlert(userId);
+    const { conversation, messages } = await api(`/api/conversations/${encodeURIComponent(userId)}`);
+    const list = el('div', { class: 'messages', id: 'messages' }, messages.map(messageNode));
+    $('chat').replaceChildren(renderChatHead(conversation), list, ...renderComposer());
     list.scrollTop = list.scrollHeight;
     post(`/api/conversations/${encodeURIComponent(userId)}/read`).catch(() => {});
     const local = inbox.find((c) => c.user_id === userId);
@@ -280,12 +418,15 @@
     updateConversation(conversation);
   }
 
-  function updateConversation(c) {
+  function updateConversation(c, { alert } = {}) {
     if (!c) return;
     const local = inbox.find((x) => x.user_id === c.id);
-    if (local) Object.assign(local, { mode: c.mode, state: c.state, summary: c.summary, profile: c.profile, handover_reason: c.handover_reason, unread: c.unread });
+    const prev = local ? { ...local } : null;
+    if (local) Object.assign(local, { mode: c.mode, state: c.state, summary: c.summary, profile: c.profile, handover_reason: c.handover_reason, unread: c.unread, name: c.name ?? local.name, external_id: c.external_id ?? local.external_id });
+    else inbox.unshift({ user_id: c.id, channel: c.channel, name: c.name, external_id: c.external_id, mode: c.mode, state: c.state, profile: c.profile, summary: c.summary, handover_reason: c.handover_reason, unread: c.unread, last_seen: c.last_seen, last_message: null, last_role: null });
     if (c.id === selected && $('chat-head')) $('chat-head').replaceWith(renderChatHead(c));
-    renderInbox();
+    if (alert !== false && alertRequiresAttention(c, prev) && c.id !== selected) notifyHandover(c);
+    renderInbox(c.id);
   }
 
   // ---------- Estado de canales ----------
@@ -375,6 +516,255 @@
     if (lastStatus) renderStatus({ ...lastStatus, whatsapp: wa });
   }
 
+  // ---------- Gráficas SVG ----------
+
+  function svgNode(tag, attrs = {}, ...children) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v != null && v !== false) node.setAttribute(k, String(v));
+    }
+    for (const child of children.flat()) {
+      if (child != null && child !== false) node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  function chartTooltip(host) {
+    let tip = host.querySelector('.chart-tooltip');
+    if (!tip) {
+      tip = el('div', { class: 'chart-tooltip', hidden: true });
+      host.append(tip);
+    }
+    return tip;
+  }
+
+  function bindTooltip(host, target, html) {
+    const tip = chartTooltip(host);
+    target.addEventListener('mouseenter', (e) => {
+      tip.innerHTML = html;
+      tip.hidden = false;
+      const rect = host.getBoundingClientRect();
+      tip.style.left = `${Math.min(e.clientX - rect.left + 12, rect.width - 160)}px`;
+      tip.style.top = `${Math.max(8, e.clientY - rect.top - 40)}px`;
+    });
+    target.addEventListener('mousemove', (e) => {
+      const rect = host.getBoundingClientRect();
+      tip.style.left = `${Math.min(e.clientX - rect.left + 12, rect.width - 160)}px`;
+      tip.style.top = `${Math.max(8, e.clientY - rect.top - 40)}px`;
+    });
+    target.addEventListener('mouseleave', () => {
+      tip.hidden = true;
+    });
+  }
+
+  function dayLabel(iso) {
+    const [, m, d] = iso.split('-');
+    return `${d}/${m}`;
+  }
+
+  function renderLineChart(host, series, legendEl) {
+    host.replaceChildren();
+    const W = 720;
+    const H = 240;
+    const pad = { t: 16, r: 20, b: 36, l: 40 };
+    const innerW = W - pad.l - pad.r;
+    const innerH = H - pad.t - pad.b;
+    const n = series.labels.length || 1;
+    const maxY = Math.max(1, ...series.lines.flatMap((l) => l.values));
+    const xAt = (i) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    const yAt = (v) => pad.t + innerH - (v / maxY) * innerH;
+
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, role: 'presentation', class: 'svg-plot' });
+    for (let tick = 0; tick <= 4; tick++) {
+      const y = pad.t + (innerH * tick) / 4;
+      const val = Math.round(maxY * (1 - tick / 4));
+      svg.append(svgNode('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: 'grid-line' }));
+      svg.append(svgNode('text', { x: pad.l - 8, y: y + 4, class: 'axis-label', 'text-anchor': 'end' }, String(val)));
+    }
+    series.labels.forEach((label, i) => {
+      if (n > 10 && i % 2 !== 0 && i !== n - 1) return;
+      svg.append(svgNode('text', { x: xAt(i), y: H - 10, class: 'axis-label', 'text-anchor': 'middle' }, dayLabel(label)));
+    });
+
+    for (const line of series.lines) {
+      const pts = line.values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
+      svg.append(svgNode('polyline', { points: pts, fill: 'none', stroke: line.color, 'stroke-width': 2.5, class: 'series-line' }));
+      line.values.forEach((v, i) => {
+        const dot = svgNode('circle', { cx: xAt(i), cy: yAt(v), r: 4, fill: line.color, class: 'series-dot' });
+        svg.append(dot);
+        bindTooltip(host, dot, `<strong>${dayLabel(series.labels[i])}</strong><br>${line.label}: ${fmt(v)}`);
+      });
+    }
+    host.append(svg);
+    if (legendEl) {
+      legendEl.replaceChildren(
+        ...series.lines.map((l) => el('span', {}, el('i', { style: `background:${l.color}` }), l.label)),
+      );
+    }
+  }
+
+  function renderFunnel(host, funnel) {
+    host.replaceChildren();
+    const steps = [
+      { key: 'interesado', label: 'Interesado', color: css('--state-interesado') },
+      { key: 'dudoso', label: 'Dudoso', color: css('--state-dudoso') },
+      { key: 'lead_caliente', label: 'Lead caliente', color: css('--state-lead') },
+    ];
+    const max = Math.max(1, ...steps.map((s) => funnel[s.key] || 0), funnel.handover || 0);
+    const W = 360;
+    const rowH = 42;
+    const H = rowH * (steps.length + 2) + 16;
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
+    const drawRow = (label, value, color, y, tip) => {
+      const w = Math.max(8, (value / max) * (W - 130));
+      const bar = svgNode('rect', { x: 120, y, width: w, height: 22, rx: 4, fill: color });
+      svg.append(svgNode('text', { x: 112, y: y + 16, class: 'legend-text', 'text-anchor': 'end' }, label));
+      svg.append(bar);
+      svg.append(svgNode('text', { x: 128 + w, y: y + 16, class: 'legend-text', 'text-anchor': 'start' }, fmt(value)));
+      bindTooltip(host, bar, tip);
+    };
+    steps.forEach((s, i) => {
+      const v = funnel[s.key] || 0;
+      drawRow(s.label, v, s.color, 12 + i * rowH, `<strong>${s.label}</strong><br>${fmt(v)} personas`);
+    });
+    const hy = 12 + steps.length * rowH + 8;
+    svg.append(svgNode('line', { x1: 20, x2: W - 20, y1: hy - 4, y2: hy - 4, class: 'grid-line' }));
+    drawRow('Derivaciones', funnel.handover || 0, css('--operator'), hy, `<strong>Derivaciones a humano</strong><br>${fmt(funnel.handover)} (aparte del embudo)`);
+    host.append(svg);
+  }
+
+  function renderDistribution(host, byState) {
+    host.replaceChildren();
+    const rows = Object.keys(STATES)
+      .map((k) => ({ state: k, users: byState.find((r) => r.state === k)?.users ?? 0, ...STATES[k] }))
+      .filter((r) => r.users > 0);
+    const total = rows.reduce((s, r) => s + r.users, 0) || 1;
+    const W = 360;
+    const H = 220;
+    const cx = 100;
+    const cy = 110;
+    const R = 70;
+    const r = 42;
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
+    let angle = -Math.PI / 2;
+    const arc = (start, end) => {
+      const x1 = cx + R * Math.cos(start);
+      const y1 = cy + R * Math.sin(start);
+      const x2 = cx + R * Math.cos(end);
+      const y2 = cy + R * Math.sin(end);
+      const ix1 = cx + r * Math.cos(end);
+      const iy1 = cy + r * Math.sin(end);
+      const ix2 = cx + r * Math.cos(start);
+      const iy2 = cy + r * Math.sin(start);
+      const large = end - start > Math.PI ? 1 : 0;
+      return `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${r} ${r} 0 ${large} 0 ${ix2} ${iy2} Z`;
+    };
+    if (!rows.length) {
+      host.append(el('p', { class: 'muted-chart' }, 'Sin datos de estado en el periodo.'));
+      return;
+    }
+    rows.forEach((row) => {
+      const slice = (row.users / total) * Math.PI * 2;
+      const end = angle + Math.max(slice, 0.02);
+      const color = css(row.color);
+      const path = svgNode('path', { d: arc(angle, end), fill: color, class: 'donut-slice' });
+      const pct = Math.round((row.users / total) * 100);
+      svg.append(path);
+      bindTooltip(host, path, `<strong>${row.icon} ${row.label}</strong><br>${fmt(row.users)} · ${pct}%`);
+      angle = end;
+    });
+    svg.append(svgNode('text', { x: cx, y: cy - 2, class: 'donut-center', 'text-anchor': 'middle' }, fmt(total)));
+    svg.append(svgNode('text', { x: cx, y: cy + 14, class: 'axis-label', 'text-anchor': 'middle' }, 'personas'));
+    rows.forEach((row, i) => {
+      const pct = Math.round((row.users / total) * 100);
+      const y = 28 + i * 28;
+      svg.append(svgNode('rect', { x: 190, y: y, width: 12, height: 12, rx: 2, fill: css(row.color) }));
+      svg.append(svgNode('text', { x: 210, y: y + 11, class: 'legend-text' }, `${row.label} · ${pct}%`));
+    });
+    host.append(svg);
+  }
+
+  function renderLatencyChart(host, days, legendEl) {
+    host.replaceChildren();
+    const W = 720;
+    const H = 240;
+    const pad = { t: 16, r: 48, b: 36, l: 48 };
+    const innerW = W - pad.l - pad.r;
+    const innerH = H - pad.t - pad.b;
+    const n = days.length || 1;
+    const latencies = days.map((d) => d.avgLatencyMs ?? 0);
+    const tokens = days.map((d) => d.tokens ?? 0);
+    const maxL = Math.max(1, ...latencies);
+    const maxT = Math.max(1, ...tokens);
+    const xAt = (i) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    const yL = (v) => pad.t + innerH - (v / maxL) * innerH;
+    const colorL = css('--navy');
+    const colorT = css('--red');
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
+
+    for (let tick = 0; tick <= 4; tick++) {
+      const y = pad.t + (innerH * tick) / 4;
+      svg.append(svgNode('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: 'grid-line' }));
+      svg.append(svgNode('text', { x: pad.l - 8, y: y + 4, class: 'axis-label', 'text-anchor': 'end' }, `${((maxL * (1 - tick / 4)) / 1000).toFixed(1)}s`));
+      svg.append(svgNode('text', { x: W - pad.r + 8, y: y + 4, class: 'axis-label', 'text-anchor': 'start' }, fmt(Math.round(maxT * (1 - tick / 4)))));
+    }
+    days.forEach((d, i) => {
+      if (n > 10 && i % 2 !== 0 && i !== n - 1) return;
+      svg.append(svgNode('text', { x: xAt(i), y: H - 10, class: 'axis-label', 'text-anchor': 'middle' }, dayLabel(d.day)));
+    });
+
+    const barW = Math.max(4, innerW / n - 6);
+    days.forEach((d, i) => {
+      const h = (d.tokens / maxT) * innerH;
+      const bar = svgNode('rect', {
+        x: xAt(i) - barW / 2,
+        y: pad.t + innerH - h,
+        width: barW,
+        height: Math.max(h, 0),
+        fill: colorT,
+        opacity: 0.35,
+        class: 'token-bar',
+      });
+      svg.append(bar);
+      bindTooltip(host, bar, `<strong>${dayLabel(d.day)}</strong><br>Tokens: ${fmt(d.tokens)}`);
+    });
+
+    const pts = latencies.map((v, i) => `${xAt(i)},${yL(v)}`).join(' ');
+    svg.append(svgNode('polyline', { points: pts, fill: 'none', stroke: colorL, 'stroke-width': 2.5 }));
+    latencies.forEach((v, i) => {
+      const dot = svgNode('circle', { cx: xAt(i), cy: yL(v), r: 4, fill: colorL });
+      svg.append(dot);
+      bindTooltip(host, dot, `<strong>${dayLabel(days[i].day)}</strong><br>Latencia: ${(v / 1000).toFixed(1)} s`);
+    });
+    host.append(svg);
+    if (legendEl) {
+      legendEl.replaceChildren(
+        el('span', {}, el('i', { style: `background:${colorL}` }), 'Latencia media'),
+        el('span', {}, el('i', { style: `background:${colorT}` }), 'Tokens'),
+      );
+    }
+  }
+
+  async function loadSvgCharts() {
+    const data = await api(`/api/analytics/timeseries?${query()}`);
+    renderLineChart(
+      $('chart-ts-lines'),
+      {
+        labels: data.days.map((d) => d.day),
+        lines: [
+          { label: 'Conversaciones nuevas', color: css('--navy'), values: data.days.map((d) => d.nuevas) },
+          { label: 'Leads calientes', color: css('--state-lead'), values: data.days.map((d) => d.leads) },
+        ],
+      },
+      $('legend-ts-lines'),
+    );
+    renderFunnel($('chart-funnel'), data.funnel);
+    renderDistribution($('chart-dist'), data.byState);
+    const showPerf = data.hasLatency || data.hasTokens;
+    $('card-latency').hidden = !showPerf;
+    if (showPerf) renderLatencyChart($('chart-latency'), data.days, $('legend-latency'));
+  }
+
   // ---------- Métricas ----------
 
   function baseOptions(extra) {
@@ -456,6 +846,7 @@
   async function loadMetrics() {
     const o = await api(`/api/overview?${query()}`);
     renderKpis(o.summary, o.events, o.byState);
+    await loadSvgCharts().catch(console.error);
     renderDays(o.byDay);
     const states = Object.keys(STATES).filter((k) => o.byState.some((r) => r.state === k));
     horizontalBar(
@@ -567,8 +958,10 @@
     });
     source.addEventListener('conversation', (e) => {
       const c = JSON.parse(e.data);
-      if (!inbox.some((x) => x.user_id === c.id)) reloadInbox(c.id);
-      else updateConversation(c);
+      if (!inbox.some((x) => x.user_id === c.id)) {
+        updateConversation(c);
+        reloadInbox(c.id);
+      } else updateConversation(c);
     });
   }
 
@@ -596,6 +989,11 @@
   }
 
   renderFilters();
+  syncMuteButton();
+  $('mute-alerts').addEventListener('click', () => {
+    localStorage.setItem(MUTE_KEY, alertsMuted() ? '0' : '1');
+    syncMuteButton();
+  });
   api('/api/status').then(renderStatus).catch(console.error);
   loadInbox().catch(console.error);
   connect();

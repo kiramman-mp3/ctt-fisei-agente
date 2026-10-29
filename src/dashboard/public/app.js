@@ -307,6 +307,69 @@
     );
   }
 
+  // La cabecera arranca compacta para dejar el chat a la vista; la preferencia se recuerda.
+  const HEAD_KEY = 'panel-chat-head-open';
+  let headOpen = false;
+  try {
+    headOpen = localStorage.getItem(HEAD_KEY) === '1';
+  } catch {
+    // Sin almacenamiento local se usa la vista compacta.
+  }
+
+  /** Eliminar en dos pasos: el primer clic pide confirmación durante unos segundos. */
+  function deleteButton(c) {
+    let armed = null;
+    return el(
+      'button',
+      {
+        type: 'button',
+        class: 'head-delete',
+        title: 'Eliminar esta conversación y sus mensajes',
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          if (!armed) {
+            btn.classList.add('armed');
+            btn.textContent = 'Confirmar eliminación';
+            armed = setTimeout(() => {
+              armed = null;
+              btn.classList.remove('armed');
+              btn.textContent = 'Eliminar chat';
+            }, 4000);
+            return;
+          }
+          clearTimeout(armed);
+          btn.disabled = true;
+          btn.textContent = 'Eliminando…';
+          try {
+            await api(`/api/conversations/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
+            removeConversation(c.id);
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = `No se pudo eliminar: ${err.message}`;
+          }
+        },
+      },
+      'Eliminar chat',
+    );
+  }
+
+  /** Quita la conversación de la bandeja y, si estaba abierta, vuelve al estado vacío. */
+  function removeConversation(userId) {
+    inbox = inbox.filter((x) => x.user_id !== userId);
+    if (selected === userId) {
+      selected = null;
+      $('chat').replaceChildren(
+        el(
+          'div',
+          { class: 'empty' },
+          el('h2', {}, 'Conversación eliminada'),
+          el('p', {}, 'Elige otra conversación de la bandeja. Si la persona vuelve a escribir, se abrirá un chat nuevo.'),
+        ),
+      );
+    }
+    renderInbox();
+  }
+
   function renderChatHead(c) {
     const profile = c.profile || {};
     const tags = [
@@ -317,24 +380,44 @@
     const take = c.mode === 'human'
       ? el('button', { type: 'button', class: 'btn-ai', onclick: () => setMode('ai') }, 'Devolver a la IA')
       : el('button', { type: 'button', class: 'btn-take', onclick: () => setMode('human') }, 'Tomar control');
+    const toggle = el(
+      'button',
+      {
+        type: 'button',
+        class: 'head-toggle',
+        'aria-expanded': String(headOpen),
+        'aria-controls': 'chat-head-details',
+        onclick: (e) => {
+          headOpen = !headOpen;
+          try {
+            localStorage.setItem(HEAD_KEY, headOpen ? '1' : '0');
+          } catch {
+            // Sin almacenamiento local solo dura esta sesión.
+          }
+          const btn = e.currentTarget;
+          btn.setAttribute('aria-expanded', String(headOpen));
+          btn.textContent = headOpen ? 'Ocultar detalles' : 'Ver detalles';
+          $('chat-head-details').hidden = !headOpen;
+        },
+      },
+      headOpen ? 'Ocultar detalles' : 'Ver detalles',
+    );
     return el(
       'header',
-      { class: `poster ${c.mode === 'human' ? 'human' : 'ai'}`, id: 'chat-head' },
+      { class: `poster compact ${c.mode === 'human' ? 'human' : 'ai'}`, id: 'chat-head' },
       el(
         'div',
         { class: 'row' },
-        el(
-          'div',
-          { style: 'min-width: 0' },
-          el('h2', {}, displayName(c)),
-          el('div', { class: 'pills' }, stateChip(c.state), modeChip(c.mode), el('span', { class: `badge ${c.channel}` }, CHANNELS[c.channel]), ...tags.map((t) => el('span', { class: 'pill' }, t))),
-        ),
-        take,
+        el('div', { class: 'head-title' }, el('h2', {}, displayName(c)), stateChip(c.state), modeChip(c.mode)),
+        el('div', { class: 'head-actions' }, deleteButton(c), toggle, take),
       ),
-      c.handover_reason
-        ? el('p', { class: 'handover highlight' }, el('strong', {}, 'Motivo de pausa: '), c.handover_reason)
-        : null,
-      el('p', { class: 'summary' }, el('strong', {}, 'Resumen: '), c.summary || 'Aún no hay suficiente conversación para resumir.'),
+      el(
+        'div',
+        { class: 'head-details', id: 'chat-head-details', hidden: !headOpen },
+        el('div', { class: 'pills' }, el('span', { class: `badge ${c.channel}` }, CHANNELS[c.channel]), ...tags.map((t) => el('span', { class: 'pill' }, t))),
+        c.handover_reason ? el('p', { class: 'handover highlight' }, el('strong', {}, 'Motivo de pausa: '), c.handover_reason) : null,
+        el('p', { class: 'summary' }, el('strong', {}, 'Resumen: '), c.summary || 'Aún no hay suficiente conversación para resumir.'),
+      ),
     );
   }
 
@@ -569,10 +652,15 @@
     return `${d}/${m}`;
   }
 
+  /** Ancho y alto reales del contenedor: el SVG ocupa toda la tarjeta sin franjas vacías. */
+  const hostSize = (host, fallbackH) => ({
+    W: Math.max(320, Math.round(host.clientWidth || 720)),
+    H: Math.max(180, Math.round(host.clientHeight || fallbackH)),
+  });
+
   function renderLineChart(host, series, legendEl) {
     host.replaceChildren();
-    const W = 720;
-    const H = 240;
+    const { W, H } = hostSize(host, 240);
     const pad = { t: 16, r: 20, b: 36, l: 40 };
     const innerW = W - pad.l - pad.r;
     const innerH = H - pad.t - pad.b;
@@ -618,12 +706,12 @@
       { key: 'lead_caliente', label: 'Lead caliente', color: css('--state-lead') },
     ];
     const max = Math.max(1, ...steps.map((s) => funnel[s.key] || 0), funnel.handover || 0);
-    const W = 360;
+    const { W } = hostSize(host, 240);
     const rowH = 42;
     const H = rowH * (steps.length + 2) + 16;
     const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
     const drawRow = (label, value, color, y, tip) => {
-      const w = Math.max(8, (value / max) * (W - 130));
+      const w = Math.max(8, (value / max) * (W - 180));
       const bar = svgNode('rect', { x: 120, y, width: w, height: 22, rx: 4, fill: color });
       svg.append(svgNode('text', { x: 112, y: y + 16, class: 'legend-text', 'text-anchor': 'end' }, label));
       svg.append(bar);
@@ -691,65 +779,75 @@
     host.append(svg);
   }
 
-  function renderLatencyChart(host, days, legendEl) {
-    host.replaceChildren();
-    const W = 720;
-    const H = 240;
-    const pad = { t: 16, r: 48, b: 36, l: 48 };
+  /** Ejes y etiquetas comunes a los gráficos diarios de rendimiento (un solo eje Y). */
+  function dailyFrame(svg, days, { W, H, pad, max, format }) {
     const innerW = W - pad.l - pad.r;
     const innerH = H - pad.t - pad.b;
     const n = days.length || 1;
-    const latencies = days.map((d) => d.avgLatencyMs ?? 0);
-    const tokens = days.map((d) => d.tokens ?? 0);
-    const maxL = Math.max(1, ...latencies);
-    const maxT = Math.max(1, ...tokens);
-    const xAt = (i) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-    const yL = (v) => pad.t + innerH - (v / maxL) * innerH;
-    const colorL = css('--navy');
-    const colorT = css('--red');
-    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
-
+    const xAt = (i) => pad.l + ((i + 0.5) * innerW) / n;
     for (let tick = 0; tick <= 4; tick++) {
       const y = pad.t + (innerH * tick) / 4;
       svg.append(svgNode('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: 'grid-line' }));
-      svg.append(svgNode('text', { x: pad.l - 8, y: y + 4, class: 'axis-label', 'text-anchor': 'end' }, `${((maxL * (1 - tick / 4)) / 1000).toFixed(1)}s`));
-      svg.append(svgNode('text', { x: W - pad.r + 8, y: y + 4, class: 'axis-label', 'text-anchor': 'start' }, fmt(Math.round(maxT * (1 - tick / 4)))));
+      svg.append(svgNode('text', { x: pad.l - 8, y: y + 4, class: 'axis-label', 'text-anchor': 'end' }, format(max * (1 - tick / 4))));
     }
     days.forEach((d, i) => {
-      if (n > 10 && i % 2 !== 0 && i !== n - 1) return;
-      svg.append(svgNode('text', { x: xAt(i), y: H - 10, class: 'axis-label', 'text-anchor': 'middle' }, dayLabel(d.day)));
+      if (n > 7 && i % 3 !== 0 && i !== n - 1) return;
+      svg.append(svgNode('text', { x: xAt(i), y: H - 8, class: 'axis-label', 'text-anchor': 'middle' }, dayLabel(d.day)));
     });
+    return { innerW, innerH, n, xAt };
+  }
 
-    const barW = Math.max(4, innerW / n - 6);
+  function renderLatencyChart(host, days) {
+    host.replaceChildren();
+    const { W, H } = hostSize(host, 220);
+    const pad = { t: 12, r: 16, b: 32, l: 44 };
+    const latencies = days.map((d) => d.avgLatencyMs);
+    const max = Math.max(1000, ...latencies.map((v) => v ?? 0));
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
+    const { innerH, xAt } = dailyFrame(svg, days, { W, H, pad, max, format: (v) => `${(v / 1000).toFixed(1)} s` });
+    const yAt = (v) => pad.t + innerH - (v / max) * innerH;
+    const color = css('--navy');
+    const pts = latencies.map((v, i) => (v == null ? null : `${xAt(i)},${yAt(v)}`)).filter(Boolean).join(' ');
+    svg.append(svgNode('polyline', { points: pts, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    latencies.forEach((v, i) => {
+      if (v == null) return;
+      const dot = svgNode('circle', { cx: xAt(i), cy: yAt(v), r: 4, fill: color, stroke: css('--surface'), 'stroke-width': 2, class: 'series-dot' });
+      svg.append(dot);
+      bindTooltip(host, dot, `<strong>${dayLabel(days[i].day)}</strong><br>Respuesta media: ${(v / 1000).toFixed(1)} s`);
+    });
+    host.append(svg);
+  }
+
+  function renderTokensChart(host, days) {
+    host.replaceChildren();
+    const { W, H } = hostSize(host, 220);
+    const pad = { t: 12, r: 16, b: 32, l: 52 };
+    const tokens = days.map((d) => d.tokens ?? 0);
+    const max = Math.max(1, ...tokens);
+    const svg = svgNode('svg', { viewBox: `0 0 ${W} ${H}`, class: 'svg-plot' });
+    const { innerW, innerH, n, xAt } = dailyFrame(svg, days, {
+      W,
+      H,
+      pad,
+      max,
+      format: (v) => (v >= 1000 ? `${Math.round(v / 1000)} k` : fmt(Math.round(v))),
+    });
+    const barW = Math.max(4, Math.min(28, (innerW / n) * 0.6));
     days.forEach((d, i) => {
-      const h = (d.tokens / maxT) * innerH;
+      const h = (tokens[i] / max) * innerH;
       const bar = svgNode('rect', {
         x: xAt(i) - barW / 2,
         y: pad.t + innerH - h,
         width: barW,
         height: Math.max(h, 0),
-        fill: colorT,
-        opacity: 0.35,
+        rx: 3,
+        fill: css('--navy'),
         class: 'token-bar',
       });
       svg.append(bar);
-      bindTooltip(host, bar, `<strong>${dayLabel(d.day)}</strong><br>Tokens: ${fmt(d.tokens)}`);
-    });
-
-    const pts = latencies.map((v, i) => `${xAt(i)},${yL(v)}`).join(' ');
-    svg.append(svgNode('polyline', { points: pts, fill: 'none', stroke: colorL, 'stroke-width': 2.5 }));
-    latencies.forEach((v, i) => {
-      const dot = svgNode('circle', { cx: xAt(i), cy: yL(v), r: 4, fill: colorL });
-      svg.append(dot);
-      bindTooltip(host, dot, `<strong>${dayLabel(days[i].day)}</strong><br>Latencia: ${(v / 1000).toFixed(1)} s`);
+      bindTooltip(host, bar, `<strong>${dayLabel(d.day)}</strong><br>Tokens: ${fmt(tokens[i])}`);
     });
     host.append(svg);
-    if (legendEl) {
-      legendEl.replaceChildren(
-        el('span', {}, el('i', { style: `background:${colorL}` }), 'Latencia media'),
-        el('span', {}, el('i', { style: `background:${colorT}` }), 'Tokens'),
-      );
-    }
   }
 
   async function loadSvgCharts() {
@@ -767,9 +865,10 @@
     );
     renderFunnel($('chart-funnel'), data.funnel);
     renderDistribution($('chart-dist'), data.byState);
-    const showPerf = data.hasLatency || data.hasTokens;
-    $('card-latency').hidden = !showPerf;
-    if (showPerf) renderLatencyChart($('chart-latency'), data.days, $('legend-latency'));
+    $('card-latency').hidden = !data.hasLatency;
+    $('card-tokens').hidden = !data.hasTokens;
+    if (data.hasLatency) renderLatencyChart($('chart-latency'), data.days);
+    if (data.hasTokens) renderTokensChart($('chart-tokens'), data.days);
   }
 
   // ---------- Métricas ----------
@@ -855,14 +954,6 @@
     renderKpis(o.summary, o.events, o.byState);
     await loadSvgCharts().catch(console.error);
     renderDays(o.byDay);
-    const states = Object.keys(STATES).filter((k) => o.byState.some((r) => r.state === k));
-    horizontalBar(
-      'chart-state',
-      states.map((k) => `${STATES[k].icon} ${STATES[k].label}`),
-      states.map((k) => o.byState.find((r) => r.state === k).users),
-      'Personas',
-      states.map((k) => css(STATES[k].color)),
-    );
     horizontalBar('chart-topic', o.byTopic.map((t) => t.label), o.byTopic.map((t) => t.questions), 'Preguntas');
     horizontalBar('chart-course', o.topCourses.map((c) => c.name), o.topCourses.map((c) => c.mentions), 'Consultas');
     draw('chart-hour', {
@@ -871,6 +962,10 @@
       options: baseOptions(),
     });
   }
+  window.addEventListener(
+    'resize',
+    debounce(() => activeTab === 'metrics' && loadSvgCharts().catch(console.error), 250),
+  );
   const reloadMetrics = debounce(() => activeTab === 'metrics' && loadMetrics().catch(console.error), 1500);
 
   // ---------- Cursos ----------
@@ -963,6 +1058,7 @@
       reloadInbox(m.user_id);
       reloadMetrics();
     });
+    source.addEventListener('deleted', (e) => removeConversation(JSON.parse(e.data).id));
     source.addEventListener('conversation', (e) => {
       const c = JSON.parse(e.data);
       if (!inbox.some((x) => x.user_id === c.id)) {

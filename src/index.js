@@ -45,7 +45,10 @@ let telegram = null;
 if (config.telegram.token) {
   telegram = createTelegramBot({ token: config.telegram.token, service, transcriber });
   try {
-    telegramInfo = await telegram.start();
+    // Sin await: si Telegram tarda en responder, el panel y WhatsApp arrancan igual.
+    telegram.start().then((me) => {
+      telegramInfo = me;
+    });
   } catch (err) {
     console.error(`[telegram] No se pudo iniciar: ${err.message}`);
   }
@@ -70,7 +73,10 @@ const app = createDashboard({
   whatsapp,
   publicWhatsAppNumber: config.whatsapp.publicNumber,
   auth: config.dashboard,
-  telegramInfo: () => (telegramInfo ? { username: telegramInfo.username } : null),
+  telegramInfo: () => {
+    if (telegramInfo) return { username: telegramInfo.username };
+    return config.telegram.token ? { connecting: true } : null;
+  },
 });
 const server = app.listen(config.dashboard.port, () => {
   console.log(`[dashboard] http://localhost:${config.dashboard.port}`);

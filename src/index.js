@@ -72,7 +72,6 @@ const app = createDashboard({
   service,
   whatsapp,
   publicWhatsAppNumber: config.whatsapp.publicNumber,
-  auth: config.dashboard,
   telegramInfo: () => {
     if (telegramInfo) return { username: telegramInfo.username };
     return config.telegram.token ? { connecting: true } : null;
@@ -80,7 +79,6 @@ const app = createDashboard({
 });
 const server = app.listen(config.dashboard.port, () => {
   console.log(`[dashboard] http://localhost:${config.dashboard.port}`);
-  if (!config.dashboard.password) console.warn('[dashboard] Sin DASHBOARD_PASSWORD: el dashboard es público.');
 });
 
 async function shutdown() {

@@ -66,7 +66,11 @@ if (!baseUrl) {
   warn('BASE_URL no definida — se omite /api/status');
 } else {
   try {
-    const res = await fetch(`${baseUrl}/api/status`);
+    // El panel puede tener autenticación básica (DASHBOARD_PASSWORD), como en Azure.
+    const headers = config.dashboard.password
+      ? { Authorization: `Basic ${Buffer.from(`${config.dashboard.user}:${config.dashboard.password}`).toString('base64')}` }
+      : {};
+    const res = await fetch(`${baseUrl}/api/status`, { headers });
     if (!res.ok) {
       fail(`GET ${baseUrl}/api/status → HTTP ${res.status}`);
       errors++;

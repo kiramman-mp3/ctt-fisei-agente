@@ -66,7 +66,8 @@ export function createDashboard({ store, service, auth, telegramInfo, whatsapp =
   const qr = (url) => QRCode.toDataURL(url, { margin: 1, width: 440, color: { dark: '#012e5a', light: '#ffffff' } });
 
   app.get('/api/public/contact', async (_req, res) => {
-    const tg = telegramInfo();
+    // Mientras Telegram se conecta no hay username todavía.
+    const tg = telegramInfo()?.username ? telegramInfo() : null;
     const number = publicWhatsAppNumber || whatsappState.number || null;
     const telegramUrl = tg ? `https://t.me/${tg.username}` : null;
     const whatsappUrl = number ? `https://wa.me/${number}` : null;

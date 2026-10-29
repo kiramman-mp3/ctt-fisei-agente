@@ -452,9 +452,11 @@
         'telegram',
         '#012e5a',
         'Telegram',
-        tg
+        tg?.username
           ? [el('span', { class: 'dot ok' }), el('a', { href: `https://t.me/${tg.username}`, target: '_blank', rel: 'noopener' }, `@${tg.username}`)]
-          : [el('span', { class: 'dot off' }), 'Sin configurar'],
+          : tg?.connecting
+            ? [el('span', { class: 'dot warn' }), 'Conectando…']
+            : [el('span', { class: 'dot off' }), 'Sin configurar'],
       ),
       renderWhatsApp(wa),
       channelItem('cursos', '#ad272e', `${st.courses.open} cursos para inscribirse`, [

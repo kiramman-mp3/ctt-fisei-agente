@@ -10,7 +10,12 @@ import { config } from '../src/config.js';
 import { SAFE_REPLY } from '../src/core/guard.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const GAP_MS = 1000;
+// Pausa entre turnos: el plan gratis de Groq limita los tokens por minuto de cada modelo.
+const GAP_MS = Number(process.env.EVAL_GAP_MS || 4000);
+// Si una respuesta sale con el mensaje de respaldo (sin cupo del LLM), se espera y se repite el caso una vez.
+const RETRY_WAIT_MS = Number(process.env.EVAL_RETRY_WAIT_MS || 30000);
+// EVAL_ONLY=temario-real,ingles ejecuta solo esos casos.
+const ONLY = (process.env.EVAL_ONLY || '').split(',').map((id) => id.trim()).filter(Boolean);
 
 const FALLBACK_HINT = /se me complicó|talleresfisei@uta\.edu\.ec/i;
 const PROMPT_LEAK = /system prompt|instrucciones (internas|ocultas|del sistema)|buildSystemPrompt|TOOL_DEFINITIONS|\[SYSTEM\]/i;
@@ -261,7 +266,13 @@ async function runCase(service, store, testCase, index) {
 
   const conversation = store.getConversation(userId);
   const result = testCase.check({ replies, conversation, userId, store });
-  return { ok: result === true, detail: result === true ? '' : String(result), replies, conversation };
+  return {
+    ok: result === true,
+    detail: result === true ? '' : String(result),
+    replies,
+    conversation,
+    rateLimited: replies.some((r) => FALLBACK_HINT.test(r)),
+  };
 }
 
 function cleanupEvalUsers(store) {
@@ -297,10 +308,16 @@ async function main() {
   let passed = 0;
   let failed = 0;
 
-  for (const [i, testCase] of CASES.entries()) {
-    process.stdout.write(`[${i + 1}/${CASES.length}] ${testCase.id} — ${testCase.name} ... `);
+  const cases = ONLY.length ? CASES.filter((c) => ONLY.includes(c.id)) : CASES;
+  for (const [i, testCase] of cases.entries()) {
+    process.stdout.write(`[${i + 1}/${cases.length}] ${testCase.id} — ${testCase.name} ... `);
     try {
-      const { ok, detail } = await runCase(service, store, testCase, i);
+      let { ok, detail, rateLimited } = await runCase(service, store, testCase, i);
+      if (!ok && rateLimited) {
+        process.stdout.write(`(sin cupo del LLM, reintento en ${RETRY_WAIT_MS / 1000} s) ... `);
+        await sleep(RETRY_WAIT_MS);
+        ({ ok, detail } = await runCase(service, store, testCase, `${i}-retry`));
+      }
       if (ok) {
         console.log('PASS');
         passed++;
@@ -318,7 +335,7 @@ async function main() {
   store.close();
 
   console.log('\n--- Resumen ---');
-  console.log(`PASS: ${passed}  FAIL: ${failed}  total: ${CASES.length}`);
+  console.log(`PASS: ${passed}  FAIL: ${failed}  total: ${cases.length}`);
   console.log(`Datos de prueba limpiados: ${cleaned} conversaciones`);
   process.exit(failed > 0 ? 1 : 0);
 }

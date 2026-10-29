@@ -19,7 +19,8 @@
     "lint": "eslint .",
     "test": "node --test",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "deploy:azure": "bash scripts/deploy-azure.sh"
   },
   "license": "MIT",
   "devDependencies": {

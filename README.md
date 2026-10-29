@@ -62,7 +62,10 @@ Las capturas se generaron con `npm run seed` (datos de ejemplo, sin personas rea
 - **Asesora con tono humano**: el prompt define a "Sofía", que conversa en mensajes cortos, recomienda uno o dos cursos según el perfil y explica su valor en lugar de listar el catálogo.
 - **Perfilado y manejo de objeciones**: descubre si la persona es estudiante UTA, graduado o público general (define la tarifa) y responde a "es caro", "no tengo tiempo" o "no sé si tengo el nivel" con datos reales del curso.
 - **Cierre de inscripción**: ante intención clara comparte el formulario de inscripción del curso y detecta inscripciones vencidas comparando con la fecha de hoy.
-- **Formulario prellenado**: al compartir el enlace de inscripción, rellena en el Google Form los datos ya conocidos del prospecto (nombre, cédula, correo, teléfono, tipo y curso) para que solo revise y envíe.
+- **Formulario prellenado**: al compartir el enlace de inscripción, rellena en el Google Form los datos ya conocidos de esa conversación (nombre, tipo de participante y curso) para que la persona solo revise y envíe.
+- **Aviso de espera**: con un operador a cargo, si nadie responde en `HOLD_OPERATOR_IDLE_MIN` minutos el bot confirma que el mensaje llegó (en español o inglés), sin repetirlo antes de `HOLD_COOLDOWN_MIN`.
+- **Contención de inyecciones graves**: pedidos de revelar el prompt, modo DAN o falsa autoridad con descuentos reciben una respuesta fija sin pasar el texto al modelo; las cifras de la respuesta se validan contra los precios del catálogo.
+- **Alertas y plantillas en el panel**: aviso sonoro (silenciable) cuando una conversación pasa a operador o se marca como urgente, plantillas rápidas para el operador y gráficas de tendencia de 14 días.
 - **Handover transparente**: la IA se pausa sola ante frustración, pedido de humano o la herramienta `transferir_a_asesor`; el operador escribe desde el panel y el mensaje llega con la identidad del bot.
 - **Reanudación automática**: si el operador no responde en `HANDOVER_TIMEOUT_MIN` minutos, la IA retoma la conversación.
 - **Termómetro en tiempo real**: cada tarjeta muestra el estado del prospecto con icono, etiqueta y color, más el modo (IA u operador) y los mensajes sin leer.
@@ -206,6 +209,8 @@ cp .env.example .env
 | `DASHBOARD_PORT`, `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Puerto y autenticación básica del panel (sin contraseña queda público) |
 | `PUBLIC_WHATSAPP_NUMBER` | Número que muestra la landing `/contacto.html` aunque WhatsApp esté desconectado (opcional) |
 | `HANDOVER_TIMEOUT_MIN` | Minutos sin respuesta del operador antes de que la IA retome (0 = nunca) |
+| `HOLD_OPERATOR_IDLE_MIN`, `HOLD_COOLDOWN_MIN` | Aviso de espera en modo operador: minutos de inactividad (3) y separación mínima entre avisos (5) |
+| `KEEPALIVE_URL` | URL opcional a la que se hace GET cada 10 minutos para que el host no se duerma |
 | `DB_PATH`, `SQLITE_JOURNAL`, `COURSES_REFRESH_HOURS` | Ruta de SQLite, modo de diario (`WAL` por defecto, `DELETE` en discos de red) y frecuencia de refresco del catálogo |
 
 > [!WARNING]
@@ -318,6 +323,7 @@ docker run -d -p 3000:3000 --env-file .env -v ctt-data:/app/storage ctt-fisei-ag
 | `POST` | `/api/conversations/:userId/mode` | `{ mode: "ai" \| "human" }`: tomar control o devolver a la IA |
 | `POST` | `/api/conversations/:userId/read` | Marca la conversación como leída |
 | `GET` | `/api/overview?range=&channel=` | Métricas agregadas |
+| `GET` | `/api/analytics/timeseries?range=&channel=` | Series de 14 días, embudo y distribución para las gráficas |
 | `GET` | `/api/public/contact` | Público: bot de Telegram, número de WhatsApp y sus QR para la landing |
 | `GET` | `/api/public/courses` | Público: cursos con inscripción abierta o por abrir |
 | `GET` | `/api/courses` | Catálogo con estado real de inscripción, ordenado por disponibilidad |
@@ -351,7 +357,7 @@ Todas las rutas responden con CORS abierto. Si hay `DASHBOARD_PASSWORD`, piden a
 
 - El prompt lleva un catálogo de una línea por curso; el detalle completo se pide con `ver_curso` solo cuando hace falta.
 - El historial se limita a los últimos 10 mensajes y a 6000 caracteres; lo anterior se resume con el analizador y entra como contexto.
-- Los mensajes del usuario se recortan a 1500 caracteres y las respuestas a 600 tokens.
+- Los mensajes del usuario se recortan a 1500 caracteres; el historial, el resumen y el perfil comparten un tope de 6000 caracteres, y las respuestas un máximo de 1200 tokens (incluye el razonamiento de `gpt-oss`).
 - El análisis del prospecto corre después de responder, así que no suma latencia.
 - Cada respuesta guarda latencia y tokens; el panel muestra el promedio de tokens por respuesta.
 

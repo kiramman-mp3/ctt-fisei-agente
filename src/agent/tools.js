@@ -28,21 +28,38 @@ const fuzzyIncludes = (words, term) =>
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 /**
- * Fechas de un rango como "Del 01 de octubre de 2026 al 15 de octubre de 2026" o
- * "Del 19 de mayo al 04 de junio de 2025" (el año de la primera fecha puede faltar).
+ * Fechas de un rango como "Del 01 de octubre de 2026 al 15 de octubre de 2026",
+ * "Del 19 de mayo al 04 de junio de 2025", "Del 07 al 30 de junio de 2025" o
+ * "Del 31-mayo al 05-julio-2025" (el año/mes de la primera fecha puede faltar).
+ * Las instantes se anclan a America/Guayaquil (UTC−5).
  */
 export function parseDateRange(text) {
   if (!text) return null;
-  const t = normalize(text).replace('setiembre', 'septiembre');
+  const t = normalize(text).replace('setiembre', 'septiembre').replace(/\bdel\b/g, ' ');
   const years = [...t.matchAll(/\b(20\d{2})\b/g)].map((m) => Number(m[1]));
-  const days = [...t.matchAll(/(\d{1,2}) de ([a-z]+)/g)].filter((m) => MONTHS.includes(m[2]));
-  if (!years.length || !days.length) return null;
+  if (!years.length) return null;
+
+  // "14 de noviembre" o "31-mayo" / "05-julio-2025"
+  const days = [...t.matchAll(/(\d{1,2})(?:\s+de\s+|-)([a-z]+)/g)]
+    .map((m) => ({ day: Number(m[1]), month: m[2] }))
+    .filter((d) => MONTHS.includes(d.month));
+
+  // "Del 07 al 30 de junio": el primer día va sin mes; se toma el del siguiente.
+  if (days.length === 1) {
+    const orphan = t.match(/\b(\d{1,2})\s+al\s+(\d{1,2})(?:\s+de\s+|-)([a-z]+)/);
+    if (orphan && MONTHS.includes(orphan[3])) {
+      days.unshift({ day: Number(orphan[1]), month: orphan[3] });
+    }
+  }
+
+  if (!days.length) return null;
   const first = days[0];
   const last = days.at(-1);
   const firstYear = years.length > 1 ? years[0] : years.at(-1);
+  const lastYear = years.at(-1);
   return {
-    start: new Date(Date.UTC(firstYear, MONTHS.indexOf(first[2]), Number(first[1]), 5, 0)),
-    end: new Date(Date.UTC(years.at(-1), MONTHS.indexOf(last[2]), Number(last[1]), 23, 59) + 5 * 3600_000),
+    start: new Date(Date.UTC(firstYear, MONTHS.indexOf(first.month), first.day, 5, 0)),
+    end: new Date(Date.UTC(lastYear, MONTHS.indexOf(last.month), last.day, 23, 59) + 5 * 3600_000),
   };
 }
 
@@ -57,6 +74,20 @@ export function registrationStatus(c, now = new Date()) {
   return range.start > now ? 'próxima' : 'abierta';
 }
 
+/**
+ * Estado del curso por fechas reales (America/Guayaquil): `en curso` / `finalizado`
+ * según "Fecha del curso"; si aún no empieza, reutiliza el estado de inscripción.
+ * La web a veces marca "ABIERTO" ediciones de 2025 ya terminadas.
+ */
+export function courseStatus(c, now = new Date()) {
+  const range = parseDateRange(c.details?.['Fecha del curso']);
+  if (range) {
+    if (now > range.end) return 'finalizado';
+    if (now >= range.start) return 'en curso';
+  }
+  return registrationStatus(c, now);
+}
+
 /** Cursos que el asistente puede ofrecer: inscripción abierta o por abrir. */
 export const isOfferable = (status) => status === 'próxima' || status.startsWith('abierta');
 
@@ -66,6 +97,7 @@ export function courseSummary(c) {
     nombre: c.name,
     estado: c.status,
     inscripcion: registrationStatus(c),
+    estado_curso: courseStatus(c),
     horas: c.hours,
     modalidad: c.details?.['Modalidad'] ?? null,
     inscripciones: c.details?.['Fechas de inscripciones'] ?? null,
@@ -99,6 +131,7 @@ export function getCourse({ id }) {
   const c = getCourses().find((course) => course.id === Number(id));
   if (!c) return { error: `No existe un curso con id ${id}` };
   const registration = registrationStatus(c);
+  const status = courseStatus(c);
   const range = parseDateRange(c.details?.['Fechas de inscripciones']);
   // Solo los títulos de unidades/módulos: el detalle anidado duplica texto y gasta tokens.
   const units = (c.contents ?? []).filter((x) => /^(unidad|m[oó]dulo)/i.test(x));
@@ -107,12 +140,17 @@ export function getCourse({ id }) {
     nombre: c.name,
     estado: c.status,
     estado_inscripcion: registration,
+    estado_curso: status,
     aviso:
-      registration === 'vencida'
-        ? 'La inscripción de esta edición YA CERRÓ: dilo, no compartas el enlace y recomienda el curso con inscripción abierta más afín. No transfieras a un asesor por esto.'
-        : registration === 'próxima'
-          ? `Las inscripciones abren el ${range.start.toISOString().slice(0, 10)}: dilo con esa fecha y comparte igual el enlace para que se registre desde ese día.`
-          : undefined,
+      status === 'finalizado'
+        ? 'Esta edición YA FINALIZÓ: dilo, no compartas el enlace y recomienda el curso con inscripción abierta más afín. No transfieras a un asesor por esto.'
+        : status === 'en curso'
+          ? 'El curso ya está EN CURSO: dilo con claridad; si la inscripción sigue abierta compártela, si no recomienda otra edición abierta.'
+          : registration === 'vencida'
+            ? 'La inscripción de esta edición YA CERRÓ: dilo, no compartas el enlace y recomienda el curso con inscripción abierta más afín. No transfieras a un asesor por esto.'
+            : registration === 'próxima'
+              ? `Las inscripciones abren el ${range.start.toISOString().slice(0, 10)}: dilo con esa fecha y comparte igual el enlace para que se registre desde ese día.`
+              : undefined,
     horas: c.hours,
     descripcion: c.description,
     objetivos: c.objectives,
@@ -123,7 +161,10 @@ export function getCourse({ id }) {
     materiales: c.materials,
     contenidos: (units.length ? units : (c.contents ?? []).slice(0, 12)).map((x) => (x.length > 180 ? `${x.slice(0, 180)}…` : x)),
     url: c.url,
-    inscripcion: isOfferable(registration) ? (c.registrationUrl ?? `${c.url}#inscripcion`) : null,
+    inscripcion:
+      status === 'finalizado' || !isOfferable(registration)
+        ? null
+        : (c.registrationUrl ?? `${c.url}#inscripcion`),
   };
 }
 
@@ -133,7 +174,7 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: 'buscar_cursos',
       description:
-        'Busca cursos del CTT-FISEI por tema o nombre. Devuelve un resumen (id, nombre, estado, horas, fechas). Sin consulta devuelve todo el catálogo.',
+        'Busca cursos del CTT-FISEI por tema o nombre. Devuelve un resumen (id, nombre, estado web, inscripción, estado_curso por fechas, horas, fechas). Sin consulta devuelve todo el catálogo.',
       parameters: {
         type: 'object',
         properties: {
@@ -149,7 +190,7 @@ export const TOOL_DEFINITIONS = [
     function: {
       name: 'ver_curso',
       description:
-        'Devuelve toda la información de un curso: descripción, objetivos, precios, fechas, horario, cupos, modalidad, requisitos, materiales, contenidos, instructores y enlace de inscripción.',
+        'Devuelve toda la información de un curso: descripción, objetivos, precios, fechas, estado_curso (en curso/finalizado o inscripción), horario, cupos, modalidad, requisitos, materiales, contenidos, instructores y enlace de inscripción.',
       parameters: {
         type: 'object',
         properties: { id: { type: 'integer', description: 'id del curso' } },

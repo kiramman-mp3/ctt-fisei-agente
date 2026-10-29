@@ -144,6 +144,10 @@ export function createDashboard({ store, service, auth, telegramInfo, whatsapp =
     });
   });
 
+  app.get('/api/analytics/timeseries', (req, res) => {
+    res.json(analytics.timeseries(db, filters(req)));
+  });
+
   app.get('/api/courses', (_req, res) => {
     const order = { abierta: 0, próxima: 1, 'abierta (confirmar fechas)': 2, vencida: 3, cerrada: 4 };
     const courses = getCourses()

@@ -186,6 +186,84 @@ export function eventCounts(db, { since, channel } = {}) {
   return Object.fromEntries(rows.map((r) => [r.type, r.total]));
 }
 
+/** Series para las gráficas SVG: últimos 14 días, embudo y distribución actual. */
+export function timeseries(db, { since, channel } = {}) {
+  const fourteenAgo = new Date(Date.now() - 14 * 86400_000).toISOString();
+  const daySince = since && since > fourteenAgo ? since : fourteenAgo;
+  const dayKeys = [];
+  for (let i = 13; i >= 0; i--) {
+    dayKeys.push(new Date(Date.now() - i * 86400_000).toISOString().slice(0, 10));
+  }
+
+  const userClauses = ['first_seen >= ?'];
+  const userParams = [daySince];
+  if (channel) {
+    userClauses.push('channel = ?');
+    userParams.push(channel);
+  }
+  const nuevas = db
+    .prepare(
+      `SELECT substr(first_seen, 1, 10) AS day, COUNT(*) AS total
+       FROM users WHERE ${userClauses.join(' AND ')} GROUP BY day`,
+    )
+    .all(...userParams);
+
+  const leadClauses = ["e.type = 'lead_caliente'", 'e.created_at >= ?'];
+  const leadParams = [daySince];
+  let leadFrom = 'events e';
+  if (channel) {
+    leadFrom = 'events e JOIN users u ON u.id = e.user_id';
+    leadClauses.push('u.channel = ?');
+    leadParams.push(channel);
+  }
+  const leads = db
+    .prepare(
+      `SELECT substr(e.created_at, 1, 10) AS day, COUNT(*) AS total
+       FROM ${leadFrom} WHERE ${leadClauses.join(' AND ')} GROUP BY day`,
+    )
+    .all(...leadParams);
+
+  const msgW = where(daySince, channel);
+  const perf = db
+    .prepare(
+      `SELECT substr(created_at, 1, 10) AS day,
+              ROUND(AVG(CASE WHEN latency_ms IS NOT NULL THEN latency_ms END)) AS avg_latency_ms,
+              SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) AS tokens
+       FROM messages m
+       ${msgW.sql ? `${msgW.sql} AND` : 'WHERE'} role = 'assistant' AND error IS NULL
+       GROUP BY day`,
+    )
+    .all(...msgW.params);
+
+  const byDay = Object.fromEntries(
+    dayKeys.map((day) => [day, { day, nuevas: 0, leads: 0, avgLatencyMs: null, tokens: 0 }]),
+  );
+  for (const r of nuevas) if (byDay[r.day]) byDay[r.day].nuevas = r.total;
+  for (const r of leads) if (byDay[r.day]) byDay[r.day].leads = r.total;
+  for (const r of perf) {
+    if (!byDay[r.day]) continue;
+    byDay[r.day].avgLatencyMs = r.avg_latency_ms;
+    byDay[r.day].tokens = r.tokens ?? 0;
+  }
+
+  const stateRows = byState(db, { since, channel });
+  const stateMap = Object.fromEntries(stateRows.map((r) => [r.state, r.users]));
+  const events = eventCounts(db, { since, channel });
+
+  return {
+    days: dayKeys.map((d) => byDay[d]),
+    funnel: {
+      interesado: stateMap.interesado ?? 0,
+      dudoso: stateMap.dudoso ?? 0,
+      lead_caliente: stateMap.lead_caliente ?? 0,
+      handover: events.handover ?? 0,
+    },
+    byState: stateRows,
+    hasLatency: perf.some((r) => r.avg_latency_ms != null),
+    hasTokens: perf.some((r) => (r.tokens ?? 0) > 0),
+  };
+}
+
 /** Conversaciones para la bandeja del operador, con su último mensaje. */
 export function inbox(db, { since, channel, limit = 100 } = {}) {
   const clauses = [];

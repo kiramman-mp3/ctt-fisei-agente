@@ -307,6 +307,15 @@
     );
   }
 
+  // La cabecera arranca compacta para dejar el chat a la vista; la preferencia se recuerda.
+  const HEAD_KEY = 'panel-chat-head-open';
+  let headOpen = false;
+  try {
+    headOpen = localStorage.getItem(HEAD_KEY) === '1';
+  } catch {
+    // Sin almacenamiento local se usa la vista compacta.
+  }
+
   function renderChatHead(c) {
     const profile = c.profile || {};
     const tags = [
@@ -317,24 +326,44 @@
     const take = c.mode === 'human'
       ? el('button', { type: 'button', class: 'btn-ai', onclick: () => setMode('ai') }, 'Devolver a la IA')
       : el('button', { type: 'button', class: 'btn-take', onclick: () => setMode('human') }, 'Tomar control');
+    const toggle = el(
+      'button',
+      {
+        type: 'button',
+        class: 'head-toggle',
+        'aria-expanded': String(headOpen),
+        'aria-controls': 'chat-head-details',
+        onclick: (e) => {
+          headOpen = !headOpen;
+          try {
+            localStorage.setItem(HEAD_KEY, headOpen ? '1' : '0');
+          } catch {
+            // Sin almacenamiento local solo dura esta sesión.
+          }
+          const btn = e.currentTarget;
+          btn.setAttribute('aria-expanded', String(headOpen));
+          btn.textContent = headOpen ? 'Ocultar detalles' : 'Ver detalles';
+          $('chat-head-details').hidden = !headOpen;
+        },
+      },
+      headOpen ? 'Ocultar detalles' : 'Ver detalles',
+    );
     return el(
       'header',
-      { class: `poster ${c.mode === 'human' ? 'human' : 'ai'}`, id: 'chat-head' },
+      { class: `poster compact ${c.mode === 'human' ? 'human' : 'ai'}`, id: 'chat-head' },
       el(
         'div',
         { class: 'row' },
-        el(
-          'div',
-          { style: 'min-width: 0' },
-          el('h2', {}, displayName(c)),
-          el('div', { class: 'pills' }, stateChip(c.state), modeChip(c.mode), el('span', { class: `badge ${c.channel}` }, CHANNELS[c.channel]), ...tags.map((t) => el('span', { class: 'pill' }, t))),
-        ),
-        take,
+        el('div', { class: 'head-title' }, el('h2', {}, displayName(c)), stateChip(c.state), modeChip(c.mode)),
+        el('div', { class: 'head-actions' }, toggle, take),
       ),
-      c.handover_reason
-        ? el('p', { class: 'handover highlight' }, el('strong', {}, 'Motivo de pausa: '), c.handover_reason)
-        : null,
-      el('p', { class: 'summary' }, el('strong', {}, 'Resumen: '), c.summary || 'Aún no hay suficiente conversación para resumir.'),
+      el(
+        'div',
+        { class: 'head-details', id: 'chat-head-details', hidden: !headOpen },
+        el('div', { class: 'pills' }, el('span', { class: `badge ${c.channel}` }, CHANNELS[c.channel]), ...tags.map((t) => el('span', { class: 'pill' }, t))),
+        c.handover_reason ? el('p', { class: 'handover highlight' }, el('strong', {}, 'Motivo de pausa: '), c.handover_reason) : null,
+        el('p', { class: 'summary' }, el('strong', {}, 'Resumen: '), c.summary || 'Aún no hay suficiente conversación para resumir.'),
+      ),
     );
   }
 

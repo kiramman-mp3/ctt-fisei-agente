@@ -849,6 +849,69 @@ main {
   font-size: 11px;
 }
 
+/* ---------- Cabecera compacta del chat ---------- */
+.poster.compact {
+  gap: 0;
+  padding: var(--s3) var(--s5);
+}
+.head-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  min-width: 0;
+}
+.poster.compact h2 {
+  margin-right: var(--s1);
+  font-size: 18px;
+}
+.head-actions {
+  display: flex;
+  flex: none;
+  gap: var(--s2);
+  align-items: center;
+}
+.head-toggle {
+  padding: 8px 14px;
+  border: 1px solid rgb(255 255 255 / 0.45);
+  border-radius: 999px;
+  background: none;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+}
+.head-toggle::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--s2);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.head-toggle[aria-expanded='true']::after {
+  transform: translateY(1px) rotate(-135deg);
+}
+.head-toggle:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+.head-details {
+  display: grid;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid rgb(255 255 255 / 0.2);
+}
+.head-details .pills {
+  margin-top: 0;
+}
+.poster.compact .btn-take,
+.poster.compact .btn-ai {
+  padding: 8px 16px;
+}
+
 /* ---------- Cursos ---------- */
 .courses-head {
   display: flex;
@@ -1180,7 +1243,15 @@ main {
     display: none;
   }
 }
+@media (max-width: 640px) {
+  .poster.compact .row {
+    flex-wrap: wrap;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
+  .head-toggle::after {
+    transition: none;
+  }
   .live.on::before,
   .conv.flash,
   .toast {
